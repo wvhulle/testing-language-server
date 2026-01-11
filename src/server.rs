@@ -1,7 +1,3 @@
-use crate::error::LSError;
-use crate::spec::*;
-use crate::util::resolve_path;
-use crate::util::send_stdout;
 use glob::Pattern;
 use lsp_types::*;
 use serde::Deserialize;
@@ -11,9 +7,14 @@ use std::collections::HashMap;
 use std::env::current_dir;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
-use std::process::Output;
-use testing_language_server::spec::DiscoverResult;
+use test_lsp::error::LSError;
+use test_lsp::protocol;
+use test_lsp::runner;
+use test_lsp::workspace;
+use test_lsp::{
+    AdapterConfiguration, AdapterId, DiscoveredTests, FileDiagnostics, WorkspaceAnalysis,
+    Workspaces,
+};
 
 const TOML_FILE_NAME: &str = ".testingls.toml";
 
@@ -80,7 +81,7 @@ impl TestingLS {
             ..InitializeResult::default()
         };
 
-        send_stdout(&json!({
+        protocol::send(&json!({
                 "jsonrpc": "2.0",
                 "id": id,
                 "result": result,
@@ -162,7 +163,7 @@ impl TestingLS {
                     typ: MessageType::WARNING,
                     message: warning,
                 };
-                let _ = send_stdout(&json!({
+                let _ = protocol::send(&json!({
                     "jsonrpc": "2.0",
                     "method": "window/showMessage",
                     "params": params,
@@ -174,9 +175,8 @@ impl TestingLS {
         for (adapter_id, adapter) in adapter_commands.into_iter() {
             tracing::debug!("Processing adapter: {}", adapter_id);
             let AdapterConfiguration {
-                path,
-                extra_arg,
-                env,
+                test_kind,
+                extra_arg: _,
                 include,
                 exclude,
                 workspace_dir,
@@ -186,42 +186,42 @@ impl TestingLS {
             if file_paths.is_empty() {
                 continue;
             }
-            let mut adapter_command = Command::new(path);
-            let mut args_file_path: Vec<&str> = vec![];
-            file_paths.iter().for_each(|file_path| {
-                args_file_path.push("--file-paths");
-                args_file_path.push(file_path);
-            });
-            let output = adapter_command
-                .arg("detect-workspace")
-                .args(args_file_path)
-                .arg("--")
-                .args(extra_arg)
-                .envs(env)
-                .output()?;
-            let adapter_result = String::from_utf8(output.stdout)?;
-            let workspace: DetectWorkspaceResult = serde_json::from_str(&adapter_result)?;
-            let workspace = if let Some(workspace_dir) = workspace_dir {
-                let workspace_dir = resolve_path(&project_dir, workspace_dir)
+
+            // Get the runner for this test kind
+            let test_runner: Box<dyn runner::Runner> = match runner::get(test_kind) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!("Failed to get runner for {}: {:?}", test_kind, e);
+                    continue;
+                }
+            };
+
+            // Call detect_workspaces directly
+            let workspaces = test_runner.detect_workspaces(&file_paths);
+
+            let workspace_map = if let Some(workspace_dir) = workspace_dir {
+                let workspace_dir = workspace::resolve_path(&project_dir, workspace_dir)
                     .to_str()
                     .unwrap()
                     .to_string();
-                let target_paths = workspace
-                    .data
+                let target_paths = workspaces
+                    .map
                     .into_iter()
                     .flat_map(|kv| kv.1)
                     .collect::<Vec<_>>();
                 HashMap::from([(workspace_dir, target_paths)])
             } else {
-                workspace.data
+                workspaces.map
             };
             self.workspaces_cache.push(WorkspaceAnalysis::new(
                 adapter,
-                DetectWorkspaceResult { data: workspace },
+                Workspaces {
+                    map: workspace_map,
+                },
             ))
         }
         tracing::info!("workspaces_cache={:#?}", self.workspaces_cache);
-        send_stdout(&json!({
+        protocol::send(&json!({
             "jsonrpc": "2.0",
             "method": "$/detectedWorkspace",
             "params": self.workspaces_cache,
@@ -245,7 +245,7 @@ impl TestingLS {
                  adapter_config: adapter,
                  workspaces,
              }| {
-                workspaces.data.iter().for_each(|(workspace, paths)| {
+                workspaces.map.iter().for_each(|(workspace, paths)| {
                     let _ = self.diagnose(adapter, workspace, paths);
                 })
             },
@@ -261,9 +261,9 @@ impl TestingLS {
                 let exclude = &cache.adapter_config.exclude;
                 if cache
                     .workspaces
-                    .data
+                    .map
                     .iter()
-                    .any(|(_, workspace)| workspace.contains(&path.to_string()))
+                    .any(|(_, workspace): (&String, &Vec<String>)| workspace.contains(&path.to_string()))
                 {
                     return false;
                 }
@@ -289,7 +289,7 @@ impl TestingLS {
                  adapter_config: adapter,
                  workspaces,
              }| {
-                for (workspace, paths) in workspaces.data.iter() {
+                for (workspace, paths) in workspaces.map.iter() {
                     if !paths.contains(&path.to_string()) {
                         continue;
                     }
@@ -306,42 +306,20 @@ impl TestingLS {
         workspace: &str,
         paths: &[String],
     ) -> Result<Vec<(String, Vec<Diagnostic>)>, LSError> {
-        let mut adapter_command = Command::new(&adapter.path);
         let mut diagnostics: Vec<(String, Vec<Diagnostic>)> = vec![];
-        let cwd = PathBuf::from(workspace);
-        let adapter_command = adapter_command.current_dir(&cwd);
-        let mut args: Vec<&str> = vec!["--workspace", cwd.to_str().unwrap()];
-        paths.iter().for_each(|path| {
-            args.push("--file-paths");
-            args.push(path);
-        });
 
-        let output = adapter_command
-            .arg("run-file-test")
-            .args(args)
-            .arg("--")
-            .args(&adapter.extra_arg)
-            .envs(&adapter.env)
-            .output()?;
-        let Output {
-            stdout,
-            stderr,
-            status,
-        } = output;
-        let adapter_result = String::from_utf8(stdout)?;
-        let stderr_str =
-            String::from_utf8(stderr).unwrap_or_else(|_| "<non-utf8 stderr>".to_string());
+        // Get the runner for this test kind
+        let test_runner = runner::get(&adapter.test_kind)?;
 
-        // Only show error if adapter failed (non-zero exit) AND produced no valid output
-        // Many test frameworks write progress/warnings to stderr even on success
-        match serde_json::from_str::<RunFileTestResult>(&adapter_result) {
+        // Call run_tests directly
+        match test_runner.run_tests(&paths.to_vec(), workspace, &adapter.extra_arg) {
             Ok(res) => {
                 for target_file in paths {
                     let diagnostics_for_file: Vec<Diagnostic> = res
-                        .data
+                        .files
                         .clone()
                         .into_iter()
-                        .filter(|FileDiagnostics { path, .. }| path == target_file)
+                        .filter(|FileDiagnostics { path, .. }| *path == *target_file)
                         .flat_map(|FileDiagnostics { diagnostics, .. }| diagnostics)
                         .collect();
                     let uri = Url::from_file_path(target_file.replace("file://", "")).unwrap();
@@ -349,28 +327,13 @@ impl TestingLS {
                 }
             }
             Err(err) => {
-                // JSON parse failed - this is a real error
-                let message = if !status.success() {
-                    format!(
-                        "Adapter failed with exit code {}.\nstderr: {}",
-                        status.code().unwrap_or(-1),
-                        stderr_str.lines().take(5).collect::<Vec<_>>().join("\n")
-                    )
-                } else if adapter_result.trim().is_empty() {
-                    "Adapter produced no output. Check adapter configuration.".to_string()
-                } else {
-                    format!(
-                        "Failed to parse adapter output: {}\nOutput: {}",
-                        err,
-                        adapter_result.chars().take(200).collect::<String>()
-                    )
-                };
+                let message = format!("Test runner failed: {:?}", err);
                 tracing::error!("{}", message);
                 let params: ShowMessageParams = ShowMessageParams {
                     typ: MessageType::ERROR,
                     message,
                 };
-                send_stdout(&json!({
+                protocol::send(&json!({
                     "jsonrpc": "2.0",
                     "method": "window/showMessage",
                     "params": params,
@@ -391,7 +354,7 @@ impl TestingLS {
         let progress_token = WorkDoneProgressCreateParams {
             token: token.clone(),
         };
-        send_stdout(&json!({
+        protocol::send(&json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "window/workDoneProgress/create",
@@ -408,7 +371,7 @@ impl TestingLS {
             token: token.clone(),
             value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(progress_begin)),
         };
-        send_stdout(&json!({
+        protocol::send(&json!({
             "jsonrpc": "2.0",
             "method": "$/progress",
             "params": params,
@@ -428,7 +391,7 @@ impl TestingLS {
             token: token.clone(),
             value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(progress_end)),
         };
-        send_stdout(&json!({
+        protocol::send(&json!({
             "jsonrpc": "2.0",
             "method": "$/progress",
             "params": params,
@@ -438,21 +401,21 @@ impl TestingLS {
     }
 
     #[allow(clippy::for_kv_map)]
-    pub fn discover_file(&self, path: &str) -> Result<DiscoverResult, LSError> {
+    pub fn discover_file(&self, path: &str) -> Result<DiscoveredTests, LSError> {
         let target_paths = vec![path.to_string()];
-        let mut result: DiscoverResult = DiscoverResult { data: vec![] };
+        let mut result: DiscoveredTests = DiscoveredTests { files: vec![] };
         for WorkspaceAnalysis {
             adapter_config: adapter,
             workspaces,
         } in &self.workspaces_cache
         {
-            for (_, paths) in workspaces.data.iter() {
+            for (_, paths) in workspaces.map.iter() {
                 if !paths.contains(&path.to_string()) {
                     continue;
                 }
                 result
-                    .data
-                    .extend(self.discover(adapter, &target_paths)?.data);
+                    .files
+                    .extend(self.discover(adapter, &target_paths)?.files);
             }
         }
         Ok(result)
@@ -462,27 +425,14 @@ impl TestingLS {
         &self,
         adapter: &AdapterConfiguration,
         paths: &[String],
-    ) -> Result<DiscoverResult, LSError> {
-        let mut adapter_command = Command::new(&adapter.path);
-        let mut args: Vec<&str> = vec![];
-        paths.iter().for_each(|path| {
-            args.push("--file-paths");
-            args.push(path);
-        });
-        let output = adapter_command
-            .arg("discover")
-            .args(args)
-            .arg("--")
-            .args(&adapter.extra_arg)
-            .envs(&adapter.env)
-            .output()?;
-        let adapter_result = String::from_utf8(output.stdout)?;
-        Ok(serde_json::from_str(&adapter_result)?)
+    ) -> Result<DiscoveredTests, LSError> {
+        let test_runner = runner::get(&adapter.test_kind)?;
+        test_runner.discover(paths)
     }
 
     pub fn send_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) -> Result<(), LSError> {
         let params = PublishDiagnosticsParams::new(uri, diagnostics, None);
-        send_stdout(&json!({
+        protocol::send(&json!({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
             "params": params,
@@ -491,7 +441,7 @@ impl TestingLS {
     }
 
     pub fn shutdown(&self, id: i64) -> Result<(), LSError> {
-        send_stdout(&json!({
+        protocol::send(&json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": null
@@ -527,17 +477,12 @@ mod tests {
 
     #[test]
     fn test_check_workspace() {
+        test_lsp::config::init();
         let abs_path_of_demo = std::env::current_dir().unwrap().join("demo/rust");
-        let abs_path_of_rust_adapter = std::env::current_dir()
-            .unwrap()
-            .join("target/debug/testing-ls-adapter");
-        let abs_path_of_rust_adapter = abs_path_of_rust_adapter
-            .into_os_string()
-            .into_string()
-            .unwrap();
         let adapter_conf = AdapterConfiguration {
-            path: abs_path_of_rust_adapter,
-            extra_arg: vec!["--test-kind=cargo-test".to_string()],
+            test_kind: "cargo-test".to_string(),
+            include: vec!["src/**/*.rs".to_string()],  // Only include files in src/
+            exclude: vec!["**/target/**".to_string()],
             ..Default::default()
         };
         let mut server = TestingLS {
@@ -552,22 +497,22 @@ mod tests {
             workspaces_cache: Vec::new(),
         };
         server.diagnose_workspace().unwrap();
+        assert!(!server.workspaces_cache.is_empty(), "Should have detected workspaces");
         server
             .workspaces_cache
             .iter()
             .for_each(|workspace_analysis| {
-                let adapter_command_path = workspace_analysis.adapter_config.path.clone();
-                assert!(adapter_command_path.contains("target/debug/testing-ls-adapter"));
-                workspace_analysis
+                assert_eq!(workspace_analysis.adapter_config.test_kind, "cargo-test");
+                // Check that we detected the demo/rust workspace
+                let demo_workspace = workspace_analysis
                     .workspaces
                     .data
-                    .iter()
-                    .for_each(|(workspace, paths)| {
-                        assert_eq!(workspace, abs_path_of_demo.to_str().unwrap());
-                        paths.iter().for_each(|path| {
-                            assert!(path.contains("rust/src"));
-                        });
-                    });
+                    .get(abs_path_of_demo.to_str().unwrap());
+                assert!(demo_workspace.is_some(), "Should detect demo/rust workspace");
+                let paths = demo_workspace.unwrap();
+                paths.iter().for_each(|path| {
+                    assert!(path.contains("rust/src"), "Path should be in rust/src: {}", path);
+                });
             });
     }
 

@@ -919,8 +919,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "testing-language-server"
-version = "0.1.12"
+name = "test-lsp"
+version = "0.0.1"
 dependencies = [
  "chrono",
  "clap",

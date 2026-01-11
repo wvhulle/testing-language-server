@@ -20,6 +20,16 @@ pub enum LSError {
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
 
+    // Tree-sitter errors
+    #[error("Tree-sitter language error: {0}")]
+    TreeSitterLanguage(#[from] tree_sitter::LanguageError),
+
+    #[error("Tree-sitter query error: {0}")]
+    TreeSitterQuery(#[from] tree_sitter::QueryError),
+
+    #[error("Tree-sitter parse failed")]
+    TreeSitterParse,
+
     // Adapter errors
     #[error("Unknown test kind: {0}")]
     UnknownTestKind(String),

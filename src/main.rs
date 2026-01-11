@@ -1,34 +1,30 @@
-mod error;
-mod log;
 mod server;
-mod spec;
-mod util;
 
 use std::io::{self, BufRead, Read};
 
-use error::LSError;
 use lsp_types::InitializeParams;
 use serde::de::Error;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use util::{format_uri, send_stdout};
+use test_lsp::config;
+use test_lsp::error::LSError;
+use test_lsp::log::init_logging;
+use test_lsp::protocol;
 
-use crate::log::init_logging;
 use crate::server::TestingLS;
-use crate::util::send_error;
 
 fn extract_textdocument_uri(params: &Value) -> Result<String, serde_json::Error> {
     let uri = params["textDocument"]["uri"]
         .as_str()
         .ok_or(serde_json::Error::custom("`textDocument.uri` is not set"))?;
-    Ok(format_uri(uri))
+    Ok(protocol::uri_to_path(uri))
 }
 
 fn extract_uri(params: &Value) -> Result<String, serde_json::Error> {
     let uri = params["uri"]
         .as_str()
         .ok_or(serde_json::Error::custom("`uri` is not set"))?;
-    Ok(format_uri(uri))
+    Ok(protocol::uri_to_path(uri))
 }
 
 fn main_loop(server: &mut TestingLS) -> Result<(), LSError> {
@@ -127,7 +123,7 @@ fn main_loop(server: &mut TestingLS) -> Result<(), LSError> {
                     let id = received_json["id"].as_i64().unwrap();
                     let uri = extract_uri(params)?;
                     let result = server.discover_file(&uri)?;
-                    send_stdout(&json!({
+                    protocol::send(&json!({
                             "jsonrpc": "2.0",
                             "id": id,
                             "result": result,
@@ -137,7 +133,7 @@ fn main_loop(server: &mut TestingLS) -> Result<(), LSError> {
                     // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#responseMessage
                     let id = received_json["id"].as_i64();
                     if id.is_some() {
-                        send_error(
+                        protocol::send_error(
                             id,
                             -32601, // Method not found
                             format!("method not found: {}", method),
@@ -150,6 +146,7 @@ fn main_loop(server: &mut TestingLS) -> Result<(), LSError> {
 }
 
 fn main() {
+    config::init();
     let mut server = TestingLS::new();
     let _guard = init_logging("server").expect("Failed to initialize logger");
     if let Err(ls_error) = main_loop(&mut server) {

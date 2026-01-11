@@ -1,20 +1,17 @@
 [package]
-name = "testing-language-server"
-version = "0.1.12"
-edition = "2021"
-description = "LSP server for testing with integrated adapters"
+name = "test-lsp"
+version = "0.0.1"
+authors = ["Willem Vanhulle <willemvanhulle@protonmail.com>"]
+edition = "2024"
+description = "See failed tests as diagnostic messages next to your test code."
 license = "MIT"
 
 [lints.clippy]
 pedantic = "warn"
 
 [[bin]]
-name = "testing-language-server"
+name = "test-lsp"
 path = "src/main.rs"
-
-[[bin]]
-name = "testing-ls-adapter"
-path = "src/adapter_main.rs"
 
 [dependencies]
 lsp-types = "0.95.1"
