@@ -81,14 +81,13 @@ fn discover_with_treesitter(
                     let test_id = if namespace_name.is_empty() {
                         value.to_string()
                     } else {
-                        format!("{}::{}", namespace_name, value)
+                        format!("{namespace_name}::{value}")
                     };
 
                     if test_id_set.contains(&test_id) {
                         continue;
-                    } else {
-                        test_id_set.insert(test_id.clone());
                     }
+                    test_id_set.insert(test_id.clone());
 
                     let test_item = TestItem {
                         id: test_id.clone(),
@@ -141,7 +140,7 @@ impl Runner for JestRunner {
             let tests = discover_with_treesitter(file_path, &language, DISCOVER_JEST_QUERY)?;
             files.push(FileTests {
                 tests,
-                path: file_path.to_string(),
+                path: file_path.clone(),
             });
         }
         Ok(DiscoveredTests { files })
@@ -155,7 +154,7 @@ impl Runner for JestRunner {
     ) -> Result<Diagnostics, LSError> {
         let (_, log_path) = call::run_jest(workspace)?;
         let test_result = std::fs::read_to_string(log_path)?;
-        parse::parse_jest_json(&test_result, file_paths.to_vec())
+        parse::parse_jest_json(&test_result, file_paths)
     }
 
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
@@ -178,7 +177,7 @@ impl Runner for VitestRunner {
             let tests = discover_with_treesitter(file_path, &language, DISCOVER_JEST_QUERY)?;
             files.push(FileTests {
                 tests,
-                path: file_path.to_string(),
+                path: file_path.clone(),
             });
         }
         Ok(DiscoveredTests { files })
@@ -227,7 +226,7 @@ impl Runner for DenoRunner {
             let tests = discover_with_treesitter(file_path, &language, DISCOVER_DENO_QUERY)?;
             files.push(FileTests {
                 tests,
-                path: file_path.to_string(),
+                path: file_path.clone(),
             });
         }
         Ok(DiscoveredTests { files })
@@ -292,7 +291,7 @@ impl Runner for NodeTestRunner {
 
         let stdout = String::from_utf8(output.stdout)?;
         let results = parse::parse_node_test_xml(&stdout, file_paths);
-        let result_item: Vec<FileDiagnostics> = results.into_iter().map(|r| r.into()).collect();
+        let result_item: Vec<FileDiagnostics> = results.into_iter().map(Into::into).collect();
 
         Ok(Diagnostics {
             files: result_item,

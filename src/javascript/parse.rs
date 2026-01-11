@@ -38,7 +38,7 @@ pub fn resolve_path(base_dir: &std::path::Path, relative_path: &str) -> PathBuf 
 }
 
 /// Parse Jest JSON output format
-pub fn parse_jest_json(test_result: &str, file_paths: Vec<String>) -> Result<Diagnostics, LSError> {
+pub fn parse_jest_json(test_result: &str, file_paths: &[String]) -> Result<Diagnostics, LSError> {
     let mut result_map: HashMap<String, Vec<Diagnostic>> = HashMap::new();
     let json: Value = serde_json::from_str(test_result)?;
     let test_results = json["testResults"].as_array().unwrap();

@@ -5,7 +5,7 @@
 
 mod client;
 
-use client::{run_session, TestProject};
+use client::{TestProject, run_session};
 
 #[test]
 fn test_auto_detect_rust_project() {
@@ -15,7 +15,7 @@ fn test_auto_detect_rust_project() {
 
     println!("Created test project at: {}", project.path().display());
 
-    let result = run_session(&project, 10);
+    let result = run_session(&project, 5);
     result.print_summary();
 
     // Basic protocol assertions
@@ -23,14 +23,25 @@ fn test_auto_detect_rust_project() {
     result.assert_auto_detected();
     result.assert_diagnostics_ran();
 
-    // Diagnostic assertions
+    // Diagnostic count
     result.assert_has_diagnostics();
     result.assert_diagnostic_count(1);
+
+    // Diagnostic content
     result.assert_diagnostic_for_test("test_add_fails");
+    result.assert_diagnostic_message_contains("assertion");
+
+    // Diagnostic metadata
     result.assert_diagnostic_source("cargo-test");
     result.assert_diagnostic_is_error();
-    result.assert_diagnostic_at_line(15); // Line where assert_eq! fails
-    result.assert_diagnostic_message_contains("assertion");
+
+    // Diagnostic location
+    result.assert_diagnostic_at_line(15);
+    result.assert_diagnostic_uri_contains("lib.rs");
+    result.assert_diagnostic_has_valid_range();
+
+    // Combined field check
+    result.assert_diagnostic_fields("cargo-test", 1, 15);
 }
 
 #[test]

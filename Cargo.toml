@@ -7,7 +7,10 @@ name = "assert-lsp"
 version = "0.0.1"
 
 [lints.clippy]
-pedantic = "warn"
+cast_possible_truncation = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+pedantic = { level = "warn", priority = -1 }
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive"] }
@@ -34,8 +37,8 @@ tree-sitter-php = "0.22.5"
 tree-sitter-rust = "0.21.2"
 
 # For PUnit XML parsing
-xml-rs = "0.8.21"
 crossbeam-channel = "0.5.15"
+xml-rs = "0.8.21"
 
 [dev-dependencies]
 tempfile = "3.10.1"

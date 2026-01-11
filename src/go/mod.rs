@@ -21,7 +21,7 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 
     let tree = parser
         .parse(&source_code, None)
-        .ok_or_else(|| LSError::TreeSitterParse)?;
+        .ok_or(LSError::TreeSitterParse)?;
 
     let query = Query::new(&language, DISCOVER_QUERY)?;
     let mut cursor = QueryCursor::new();
@@ -115,7 +115,7 @@ impl Runner for GoTestRunner {
         let json_output = String::from_utf8(output.stdout)?;
         parse::parse_go_test_json(
             &json_output,
-            PathBuf::from_str(workspace).unwrap(),
+            &PathBuf::from_str(workspace).unwrap(),
             file_paths,
         )
     }

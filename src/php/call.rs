@@ -10,7 +10,7 @@ pub fn run_phpunit(
     file_paths: &[String],
     filter_pattern: &str,
 ) -> Result<(Output, PathBuf), LSError> {
-    let log_path = PathBuf::from(config::get().cache_dir()).join("phpunit.xml");
+    let log_path = config::CONFIG.cache_dir.join("phpunit.xml");
 
     let output = Command::new("phpunit")
         .current_dir(workspace)

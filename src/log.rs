@@ -9,8 +9,8 @@ pub fn write_result_log(file_name: &str, output: &Output) -> io::Result<()> {
     let stdout_str = String::from_utf8(output.stdout.clone()).unwrap_or_default();
     let stderr_str = String::from_utf8(output.stderr.clone()).unwrap_or_default();
     let content = format!("stdout:\n{stdout_str}\nstderr:\n{stderr_str}");
-    let cache = config::get().cache_dir();
-    fs::create_dir_all(&cache)?;
+    let cache = &config::CONFIG.cache_dir;
+    fs::create_dir_all(cache)?;
     let log_path = cache.join(file_name);
     fs::write(&log_path, content)?;
     Ok(())

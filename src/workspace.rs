@@ -245,7 +245,6 @@ mod tests {
     use std::env::current_dir;
 
     use super::*;
-    use crate::config::init;
 
     #[test]
     fn test_resolve_path() {
@@ -279,7 +278,6 @@ mod tests {
 
     #[test]
     fn test_workspace_detection() {
-        init();
         let abs_path_of_demo = current_dir().unwrap().join("demo/rust");
         let demo_lib = abs_path_of_demo.join("src/lib.rs");
 

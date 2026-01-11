@@ -1,11 +1,11 @@
-use std::{collections::HashMap, path::PathBuf, sync::OnceLock};
+use std::{collections::HashMap, path::PathBuf, sync::LazyLock};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use crate::AdapterId;
 
-static CONFIG: OnceLock<Config> = OnceLock::new();
+pub static CONFIG: LazyLock<Config> = LazyLock::new(Config::parse);
 
 /// Configuration for a test adapter.
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -59,20 +59,15 @@ impl AdapterConfig {
 
 /// Main configuration struct for assert-lsp.
 /// Can be loaded from CLI arguments, TOML file, or LSP initialization options.
-#[derive(Parser, Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Parser, Debug, Clone, Deserialize, Serialize)]
 #[command(name = "assert-lsp")]
 #[command(about = "LSP server for showing test failures as diagnostics")]
 #[serde(rename_all = "snake_case")]
 pub struct Config {
-    /// Directory for log files
-    #[arg(long, default_value_t = default_log_dir())]
-    #[serde(default = "default_log_dir")]
-    pub log_dir: String,
-
-    /// Directory for cache files
-    #[arg(long, default_value_t = default_cache_dir())]
+    /// Directory for cache files (defaults to system temp directory)
+    #[arg(default_value_os_t = default_cache_dir())]
     #[serde(default = "default_cache_dir")]
-    pub cache_dir: String,
+    pub cache_dir: PathBuf,
 
     /// Adapter configurations per test kind
     #[arg(skip)]
@@ -80,40 +75,15 @@ pub struct Config {
     pub adapter_command: HashMap<AdapterId, AdapterConfig>,
 }
 
-fn default_log_dir() -> String {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("assert-lsp/logs")
-        .to_string_lossy()
-        .to_string()
+fn default_cache_dir() -> PathBuf {
+    std::env::temp_dir().join("assert-lsp")
 }
 
-fn default_cache_dir() -> String {
-    dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("assert-lsp")
-        .to_string_lossy()
-        .to_string()
-}
-
-impl Config {
-    #[must_use]
-    pub fn log_dir(&self) -> PathBuf {
-        PathBuf::from(&self.log_dir)
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            cache_dir: default_cache_dir(),
+            adapter_command: HashMap::new(),
+        }
     }
-
-    #[must_use]
-    pub fn cache_dir(&self) -> PathBuf {
-        PathBuf::from(&self.cache_dir)
-    }
-}
-
-pub fn init() -> &'static Config {
-    CONFIG.get_or_init(Config::parse)
-}
-
-pub fn get() -> &'static Config {
-    CONFIG
-        .get()
-        .expect("Config not initialized. Call config::init() first.")
 }

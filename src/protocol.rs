@@ -32,7 +32,7 @@ impl ErrorMessage {
     pub fn new<N: Into<Number>>(id: Option<N>, error: Value) -> Self {
         Self {
             jsonrpc: "2.0".into(),
-            id: id.map(|i| i.into()),
+            id: id.map(std::convert::Into::into),
             error,
         }
     }

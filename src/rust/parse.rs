@@ -189,7 +189,7 @@ pub fn parse_libtest_json(
         let event: LibtestEvent = match serde_json::from_str(line) {
             Ok(e) => e,
             Err(e) => {
-                log::debug!("Failed to parse libtest JSON: {}, error: {}", line, e);
+                log::debug!("Failed to parse libtest JSON: {line}, error: {e}");
                 continue;
             }
         };

@@ -69,8 +69,10 @@ impl SessionResult {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
-                            let severity =
-                                diag.get("severity").and_then(|v| v.as_u64()).map(|v| v as u32);
+                            let severity = diag
+                                .get("severity")
+                                .and_then(|v| v.as_u64())
+                                .map(|v| v as u32);
                             let source = diag
                                 .get("source")
                                 .and_then(|v| v.as_str())
@@ -123,6 +125,7 @@ impl SessionResult {
 
     /// Check if any diagnostic contains the given text
     #[must_use]
+    #[allow(dead_code)]
     pub fn has_diagnostic_containing(&self, text: &str) -> bool {
         self.parse_diagnostics()
             .iter()
@@ -174,6 +177,7 @@ impl SessionResult {
     }
 
     /// Assert that auto-detection found a project
+    #[allow(dead_code)]
     pub fn assert_auto_detected(&self) {
         assert!(
             self.stderr_contains("Auto-detected projects"),
@@ -182,6 +186,7 @@ impl SessionResult {
     }
 
     /// Assert that no project was detected
+    #[allow(dead_code)]
     pub fn assert_no_project_detected(&self) {
         assert!(
             self.stderr_contains("No project detected"),
@@ -241,10 +246,7 @@ impl SessionResult {
         assert!(
             found,
             "Expected at least one error diagnostic (severity=1), found: {:?}",
-            diagnostics
-                .iter()
-                .map(|d| d.severity)
-                .collect::<Vec<_>>()
+            diagnostics.iter().map(|d| d.severity).collect::<Vec<_>>()
         );
     }
 
@@ -255,10 +257,7 @@ impl SessionResult {
         assert!(
             found,
             "Expected diagnostic at line {line}, found lines: {:?}",
-            diagnostics
-                .iter()
-                .map(|d| d.start_line)
-                .collect::<Vec<_>>()
+            diagnostics.iter().map(|d| d.start_line).collect::<Vec<_>>()
         );
     }
 
@@ -279,6 +278,75 @@ impl SessionResult {
             self.stderr_contains("Running initial workspace diagnostics")
                 || self.stderr_contains("diagnose_workspace: starting"),
             "Expected workspace diagnostics to run"
+        );
+    }
+
+    /// Assert diagnostic URI contains the given path segment
+    pub fn assert_diagnostic_uri_contains(&self, path_segment: &str) {
+        let diagnostics = self.parse_diagnostics();
+        let found = diagnostics.iter().any(|d| d.uri.contains(path_segment));
+        assert!(
+            found,
+            "Expected diagnostic URI containing '{path_segment}', found URIs: {:?}",
+            diagnostics.iter().map(|d| &d.uri).collect::<Vec<_>>()
+        );
+    }
+
+    /// Assert diagnostic has a valid range (start <= end)
+    pub fn assert_diagnostic_has_valid_range(&self) {
+        let diagnostics = self.parse_diagnostics();
+        for diag in &diagnostics {
+            assert!(
+                diag.start_line <= diag.end_line,
+                "Invalid range: start_line {} > end_line {}",
+                diag.start_line,
+                diag.end_line
+            );
+            if diag.start_line == diag.end_line {
+                assert!(
+                    diag.start_char <= diag.end_char,
+                    "Invalid range on line {}: start_char {} > end_char {}",
+                    diag.start_line,
+                    diag.start_char,
+                    diag.end_char
+                );
+            }
+        }
+    }
+
+    /// Get the first diagnostic (for detailed assertions)
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn first_diagnostic(&self) -> Option<ParsedDiagnostic> {
+        self.parse_diagnostics().into_iter().next()
+    }
+
+    /// Assert all diagnostic fields match expected values
+    pub fn assert_diagnostic_fields(
+        &self,
+        expected_source: &str,
+        expected_severity: u32,
+        expected_line: u32,
+    ) {
+        let diagnostics = self.parse_diagnostics();
+        let found = diagnostics.iter().any(|d| {
+            d.source.as_deref() == Some(expected_source)
+                && d.severity == Some(expected_severity)
+                && d.start_line == expected_line
+        });
+        assert!(
+            found,
+            "Expected diagnostic with source='{}', severity={}, line={}, found: {:?}",
+            expected_source,
+            expected_severity,
+            expected_line,
+            diagnostics
+                .iter()
+                .map(|d| format!(
+                    "source={:?}, severity={:?}, line={}",
+                    d.source, d.severity, d.start_line
+                ))
+                .collect::<Vec<_>>()
         );
     }
 }
@@ -379,7 +447,7 @@ impl LspClient {
         );
         println!("Sending initialize...");
         self.send(&init);
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(100));
 
         println!("Sending initialized...");
         self.send(r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#);
@@ -389,7 +457,7 @@ impl LspClient {
     pub fn shutdown_and_exit(&mut self) {
         println!("Sending shutdown...");
         self.send(r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":null}"#);
-        thread::sleep(Duration::from_millis(200));
+        thread::sleep(Duration::from_millis(50));
 
         println!("Sending exit...");
         self.send(r#"{"jsonrpc":"2.0","method":"exit","params":null}"#);
@@ -401,7 +469,7 @@ impl LspClient {
         drop(self.stdin);
 
         // Give the server a moment to exit gracefully
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(100));
 
         // Try to kill the process if it's still running
         let _ = self.child.kill();
@@ -502,6 +570,7 @@ mod tests {
 
     /// Add a .assert-lsp.toml config file
     #[must_use]
+    #[allow(dead_code)]
     pub fn with_config(self, config: &str) -> Self {
         fs::write(self.path.join(".assert-lsp.toml"), config).expect("Failed to write config");
         self
@@ -509,6 +578,7 @@ mod tests {
 
     /// Add the default Rust adapter config
     #[must_use]
+    #[allow(dead_code)]
     pub fn with_rust_config(self) -> Self {
         self.with_config(
             r#"[adapter_command.rust]

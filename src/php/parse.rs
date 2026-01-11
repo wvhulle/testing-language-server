@@ -90,7 +90,7 @@ pub fn parse_phpunit_xml(path: &str) -> Result<Vec<ResultFromXml>, LSError> {
 
 pub fn to_diagnostics(results: Vec<ResultFromXml>) -> Diagnostics {
     Diagnostics {
-        files: results.into_iter().map(|r| r.into()).collect(),
+        files: results.into_iter().map(std::convert::Into::into).collect(),
         messages: vec![],
     }
 }

@@ -6,7 +6,7 @@ use std::{
 use crate::{config, error::LSError, log::write_result_log};
 
 pub fn run_jest(workspace: &str) -> Result<(Output, PathBuf), LSError> {
-    let log_path = PathBuf::from(config::get().cache_dir()).join("jest.json");
+    let log_path = PathBuf::from(&config::CONFIG.cache_dir).join("jest.json");
 
     let output = Command::new("jest")
         .current_dir(workspace)
@@ -26,7 +26,7 @@ pub fn run_jest(workspace: &str) -> Result<(Output, PathBuf), LSError> {
 }
 
 pub fn run_vitest(workspace: &str) -> Result<(Output, PathBuf), LSError> {
-    let log_path = PathBuf::from(config::get().cache_dir()).join("vitest.json");
+    let log_path = PathBuf::from(&config::CONFIG.cache_dir).join("vitest.json");
 
     let output = Command::new("vitest")
         .current_dir(workspace)

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::Path};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use regex::Regex;
@@ -30,13 +30,13 @@ struct TestResultLine {
 fn get_position_from_output(output: &str) -> Option<(String, u32)> {
     let pattern = r"^\s{4}(.*_test\.go):(\d+):";
     let re = Regex::new(pattern).unwrap();
-    if let Some(captures) = re.captures(output) {
-        if let (Some(file_name), Some(lnum)) = (captures.get(1), captures.get(2)) {
-            return Some((
-                file_name.as_str().to_string(),
-                lnum.as_str().parse::<u32>().unwrap() - 1,
-            ));
-        }
+    if let Some(captures) = re.captures(output)
+        && let (Some(file_name), Some(lnum)) = (captures.get(1), captures.get(2))
+    {
+        return Some((
+            file_name.as_str().to_string(),
+            lnum.as_str().parse::<u32>().unwrap() - 1,
+        ));
     }
     None
 }
@@ -47,7 +47,7 @@ fn get_log_from_output(output: &str) -> String {
 
 pub fn parse_go_test_json(
     contents: &str,
-    workspace_root: PathBuf,
+    workspace_root: &Path,
     file_paths: &[String],
 ) -> Result<Diagnostics, LSError> {
     let contents = contents.replace("\r\n", "\n");
@@ -126,7 +126,7 @@ pub fn parse_go_test_json(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::read_to_string, str::FromStr};
+    use std::{fs::read_to_string, path::PathBuf, str::FromStr};
 
     use super::*;
 
@@ -138,7 +138,7 @@ mod tests {
         let workspace = PathBuf::from_str("/home/demo/test/go/src/test").unwrap();
         let target_file_path = "/home/demo/test/go/src/test/cases_test.go";
         let result =
-            parse_go_test_json(&contents, workspace, &[target_file_path.to_string()]).unwrap();
+            parse_go_test_json(&contents, &workspace, &[target_file_path.to_string()]).unwrap();
         let result = result.files.first().unwrap();
         assert_eq!(result.path, target_file_path);
         let diagnostic = result.diagnostics.first().unwrap();
