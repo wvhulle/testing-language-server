@@ -23,6 +23,7 @@ pub struct ParsedDiagnostic {
     pub message: String,
     pub severity: Option<u32>,
     pub source: Option<String>,
+    pub code: Option<String>,
     pub start_line: u32,
     pub start_char: u32,
     pub end_line: u32,
@@ -98,12 +99,17 @@ impl SessionResult {
                                 .and_then(|s| s.get("character"))
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as u32;
+                            let code = diag
+                                .get("code")
+                                .and_then(|v| v.as_str())
+                                .map(String::from);
 
                             result.push(ParsedDiagnostic {
                                 uri: uri.clone(),
                                 message,
                                 severity,
                                 source,
+                                code,
                                 start_line,
                                 start_char,
                                 end_line,
@@ -269,6 +275,19 @@ impl SessionResult {
             found,
             "Expected diagnostic message containing '{text}', found messages: {:?}",
             diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// Assert a diagnostic has the given code
+    pub fn assert_diagnostic_code(&self, expected_code: &str) {
+        let diagnostics = self.parse_diagnostics();
+        let found = diagnostics
+            .iter()
+            .any(|d| d.code.as_deref() == Some(expected_code));
+        assert!(
+            found,
+            "Expected diagnostic with code '{expected_code}', found codes: {:?}",
+            diagnostics.iter().map(|d| &d.code).collect::<Vec<_>>()
         );
     }
 

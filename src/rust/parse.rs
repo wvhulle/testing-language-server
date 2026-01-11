@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -127,6 +127,7 @@ pub fn parse_nextest_output(
                     message: message.clone(),
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("cargo-nextest".to_string()),
+                    code: Some(NumberOrString::String("nextest-failed".to_string())),
                     ..Diagnostic::default()
                 };
 
@@ -150,6 +151,7 @@ pub fn parse_nextest_output(
                         ),
                         severity: Some(DiagnosticSeverity::ERROR),
                         source: Some("cargo-nextest".to_string()),
+                        code: Some(NumberOrString::String("nextest-failed".to_string())),
                         ..Diagnostic::default()
                     };
                     result_map
@@ -254,11 +256,21 @@ pub fn parse_libtest_json(
                 (test_item.path.clone(), test_item.start_position)
             };
 
+            // Determine code based on test path (integration vs unit test)
+            let code = if test_item.path.contains("/tests/") {
+                "integration-test-failed"
+            } else if test_name.starts_with("doc") || test_name.contains("::doc::") {
+                "doctest-failed"
+            } else {
+                "unit-test-failed"
+            };
+
             let diagnostic = Diagnostic {
                 range: primary_range,
                 message: diagnostic_message,
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("cargo-test".to_string()),
+                code: Some(NumberOrString::String(code.to_string())),
                 related_information: Some(vec![related_info]),
                 ..Diagnostic::default()
             };

@@ -1,6 +1,6 @@
 use std::{fs::File, io::BufReader};
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use xml::reader::{ParserConfig, XmlEvent};
 
 use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH, error::LSError};
@@ -29,6 +29,8 @@ impl From<ResultFromXml> for FileDiagnostics {
                 },
                 message: result.message,
                 severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("phpunit".to_string()),
+                code: Some(NumberOrString::String("phpunit-failed".to_string())),
                 ..Diagnostic::default()
             }],
         }

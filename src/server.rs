@@ -467,7 +467,7 @@ impl TestingLS {
         workspace: &str,
         paths: &[String],
     ) -> Result<(), LSError> {
-        let token = NumberOrString::String("testing-ls/start_testing".to_string());
+        let token = NumberOrString::String("assert-lsp/start_testing".to_string());
         let progress_token = WorkDoneProgressCreateParams {
             token: token.clone(),
         };

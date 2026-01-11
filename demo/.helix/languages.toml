@@ -1,23 +1,48 @@
-[language-server.testing-ls]
-command = "testing-language-server"
+[language-server.assert-lsp]
 args = []
+command = "testing-language-server"
 
 [[language]]
+language-servers = [
+    { name = "assert-lsp", only-features = [
+        "diagnostics",
+    ] },
+    "rust-analyzer",
+]
 name = "rust"
-language-servers = [ { name = "testing-ls", only-features = [ "diagnostics" ] }, "rust-analyzer" ]
 
 [[language]]
+language-servers = [
+    { name = "assert-lsp", only-features = [
+        "diagnostics",
+    ] },
+    "typescript-language-server",
+]
 name = "typescript"
-language-servers = [ { name = "testing-ls", only-features = [ "diagnostics" ] }, "typescript-language-server" ]
 
 [[language]]
+language-servers = [
+    { name = "assert-lsp", only-features = [
+        "diagnostics",
+    ] },
+    "phpactor",
+]
 name = "php"
-language-servers = [ { name = "testing-ls", only-features = [ "diagnostics" ] }, "phpactor" ]
 
 [[language]]
+language-servers = [
+    { name = "assert-lsp", only-features = [
+        "diagnostics",
+    ] },
+    "gopls",
+]
 name = "go"
-language-servers = [ { name = "testing-ls", only-features = [ "diagnostics" ] }, "gopls" ]
 
 [[language]]
+language-servers = [
+    { name = "assert-lsp", only-features = [
+        "diagnostics",
+    ] },
+    "typescript-language-server",
+]
 name = "javascript"
-language-servers = [ { name = "testing-ls", only-features = [ "diagnostics" ] }, "typescript-language-server" ]

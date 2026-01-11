@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use regex::Regex;
 use serde_json::Value;
 use xml::{ParserConfig, reader::XmlEvent};
@@ -75,6 +75,8 @@ pub fn parse_jest_json(test_result: &str, file_paths: &[String]) -> Result<Diagn
                     },
                     message,
                     severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("jest".to_string()),
+                    code: Some(NumberOrString::String("jest-failed".to_string())),
                     ..Diagnostic::default()
                 };
                 result_map
@@ -137,6 +139,8 @@ pub fn parse_vitest_json(
                     },
                     message,
                     severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("vitest".to_string()),
+                    code: Some(NumberOrString::String("vitest-failed".to_string())),
                     ..Diagnostic::default()
                 };
                 result_map
@@ -206,6 +210,8 @@ pub fn parse_deno_output(
                     },
                     message: message.clone(),
                     severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("deno".to_string()),
+                    code: Some(NumberOrString::String("deno-test-failed".to_string())),
                     ..Diagnostic::default()
                 };
                 let file_path = resolve_path(&workspace_root, file_name.as_ref().unwrap())
@@ -256,6 +262,8 @@ impl From<ResultFromXml> for FileDiagnostics {
                     },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("node-test".to_string()),
+                code: Some(NumberOrString::String("node-test-failed".to_string())),
                 ..Default::default()
             }],
         }

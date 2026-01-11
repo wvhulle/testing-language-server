@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 use regex::Regex;
 use serde::Deserialize;
 
@@ -100,6 +100,8 @@ pub fn parse_go_test_json(
                 },
                 message: message.clone(),
                 severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("go-test".to_string()),
+                code: Some(NumberOrString::String("go-test-failed".to_string())),
                 ..Diagnostic::default()
             };
             let file_path = workspace_root

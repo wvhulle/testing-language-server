@@ -34,6 +34,7 @@ fn test_auto_detect_rust_project() {
     // Diagnostic metadata
     result.assert_diagnostic_source("cargo-test");
     result.assert_diagnostic_is_error();
+    result.assert_diagnostic_code("unit-test-failed");
 
     // Diagnostic location
     result.assert_diagnostic_at_line(15);

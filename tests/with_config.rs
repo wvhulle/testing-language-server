@@ -34,6 +34,7 @@ fn test_with_config_detects_failing_test() {
     // Diagnostic metadata
     result.assert_diagnostic_source("cargo-test");
     result.assert_diagnostic_is_error();
+    result.assert_diagnostic_code("unit-test-failed");
 
     // Diagnostic location
     result.assert_diagnostic_at_line(15);
@@ -48,6 +49,7 @@ fn test_with_config_detects_failing_test() {
     assert!(diag.uri.ends_with("lib.rs"), "URI should end with lib.rs: {}", diag.uri);
     assert_eq!(diag.severity, Some(1), "Severity should be Error (1)");
     assert_eq!(diag.source, Some("cargo-test".to_string()), "Source should be cargo-test");
+    assert_eq!(diag.code, Some("unit-test-failed".to_string()), "Code should be unit-test-failed");
     assert_eq!(diag.start_line, 15, "Start line should be 15");
     assert!(diag.message.contains("test_add_fails"), "Message should contain test name");
 }
