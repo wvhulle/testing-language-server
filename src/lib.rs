@@ -10,6 +10,7 @@ pub mod error;
 pub mod log;
 pub mod protocol;
 pub mod runner;
+pub mod server;
 pub mod workspace;
 
 // Language-specific modules
@@ -17,6 +18,9 @@ pub mod go;
 pub mod javascript;
 pub mod php;
 pub mod rust;
+
+// Re-export config types for convenience
+pub use config::{AdapterConfig, Config};
 
 /// If the character value is greater than the line length it defaults back to
 /// the line length.
@@ -72,68 +76,16 @@ pub struct Workspaces {
     pub map: HashMap<WorkspacePath, Vec<FilePath>>,
 }
 
-// --- Configuration Types ---
-
-/// Configuration for a test adapter.
-#[derive(Debug, Deserialize, Clone, Serialize, Default)]
-pub struct AdapterConfiguration {
-    /// Test runner kind (e.g., "cargo-test", "cargo-nextest", "jest", "vitest",
-    /// "go-test", "phpunit", "node-test", "deno")
-    pub test_kind: String,
-    #[serde(default)]
-    pub extra_arg: Vec<String>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    pub include: Vec<String>,
-    #[serde(default)]
-    pub exclude: Vec<String>,
-    pub workspace_dir: Option<String>,
-}
-
-impl AdapterConfiguration {
-    /// Validate configuration and return warnings.
-    pub fn validate(&self, adapter_id: &str) -> Vec<String> {
-        let mut warnings = Vec::new();
-
-        let valid_kinds = [
-            "cargo-test",
-            "cargo-nextest",
-            "jest",
-            "vitest",
-            "go-test",
-            "phpunit",
-            "node-test",
-            "deno",
-        ];
-        if !valid_kinds.contains(&self.test_kind.as_str()) {
-            warnings.push(format!(
-                "Adapter '{}': unknown test_kind '{}'. Valid values are: {}",
-                adapter_id,
-                self.test_kind,
-                valid_kinds.join(", ")
-            ));
-        }
-
-        if self.include.is_empty() {
-            warnings.push(format!(
-                "Adapter '{}': no include patterns specified",
-                adapter_id
-            ));
-        }
-
-        warnings
-    }
-}
-
 /// Analysis result for a workspace with its adapter configuration.
 #[derive(Debug, Serialize, Clone)]
 pub struct WorkspaceAnalysis {
-    pub adapter_config: AdapterConfiguration,
+    pub adapter_config: AdapterConfig,
     pub workspaces: Workspaces,
 }
 
 impl WorkspaceAnalysis {
-    pub fn new(adapter_config: AdapterConfiguration, workspaces: Workspaces) -> Self {
+    #[must_use]
+    pub fn new(adapter_config: AdapterConfig, workspaces: Workspaces) -> Self {
         Self {
             adapter_config,
             workspaces,

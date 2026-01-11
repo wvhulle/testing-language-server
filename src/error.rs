@@ -11,6 +11,15 @@ pub enum LSError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("JSON serde error: {0}")]
+    JsonSerde(serde_json::Error),
+
+    #[error("Protocol error: {0}")]
+    Protocol(#[from] lsp_server::ProtocolError),
+
+    #[error("Channel send error: {0}")]
+    ChannelSend(String),
+
     #[error("UTF8 error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
 

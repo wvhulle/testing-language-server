@@ -1,0 +1,49 @@
+enable_workspace_diagnostics = true
+
+[adapter_command.cargo-test]
+exclude = ["/**/target/**"]
+extra_arg = []
+include = ["/**/src/**/*.rs"]
+test_kind = "cargo-test"
+
+[adapter_command.cargo-nextest]
+exclude = ["/**/target/**"]
+extra_arg = []
+include = ["/**/src/**/*.rs"]
+test_kind = "cargo-nextest"
+
+[adapter_command.jest]
+exclude = ["/jest/**/node_modules/**/*"]
+extra_arg = []
+include = ["/jest/*.js"]
+test_kind = "jest"
+
+[adapter_command.vitest]
+exclude = ["/vitest/**/node_modules/**/*"]
+extra_arg = []
+include = ["/vitest/*.test.ts", "/vitest/config/**/*.test.ts"]
+test_kind = "vitest"
+
+[adapter_command.deno]
+exclude = []
+extra_arg = []
+include = ["/deno/*.ts"]
+test_kind = "deno"
+
+[adapter_command.go]
+exclude = []
+extra_arg = []
+include = ["/**/*.go"]
+test_kind = "go-test"
+
+[adapter_command.node-test]
+exclude = []
+extra_arg = []
+include = ["/node-test/*.test.js"]
+test_kind = "node-test"
+
+[adapter_command.phpunit]
+exclude = ["/phpunit/vendor/**/*.php"]
+extra_arg = []
+include = ["/**/*Test.php"]
+test_kind = "phpunit"

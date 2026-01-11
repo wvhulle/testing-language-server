@@ -1,15 +1,8 @@
 enableWorkspaceDiagnostics = true
 
 [adapterCommand.rust]
-path = "testing-ls-adapter"
-extra_arg = [
-  "--test-kind=cargo-test",
-  "--workspace"
-]
-include = [
-  "/**/*.rs"
-]
-exclude = [
-  "/demo/**/*"
-]
+exclude = ["/demo/**/*", "/target/**/*"]
+extra_arg = ["--workspace"]
+include = ["/**/*.rs"]
+test_kind = "cargo-test"
 workspace_dir = "."

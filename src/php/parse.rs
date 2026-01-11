@@ -78,7 +78,7 @@ pub fn parse_phpunit_xml(path: &str) -> Result<Vec<ResultFromXml>, LSError> {
             }
             Ok(XmlEvent::EndDocument) => break,
             Err(e) => {
-                tracing::error!("XML parse error: {e}");
+                log::error!("XML parse error: {e}");
                 return Err(LSError::XmlParse);
             }
             _ => {}

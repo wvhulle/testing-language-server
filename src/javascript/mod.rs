@@ -133,7 +133,6 @@ fn discover_with_treesitter(
 pub struct JestRunner;
 
 impl Runner for JestRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let language = tree_sitter_javascript::language();
         let mut files = Vec::new();
@@ -148,7 +147,6 @@ impl Runner for JestRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -160,7 +158,6 @@ impl Runner for JestRunner {
         parse::parse_jest_json(&test_result, file_paths.to_vec())
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(file_paths, &["package.json"])
     }
@@ -172,7 +169,6 @@ impl Runner for JestRunner {
 pub struct VitestRunner;
 
 impl Runner for VitestRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let language = tree_sitter_javascript::language();
         let mut files = Vec::new();
@@ -188,7 +184,6 @@ impl Runner for VitestRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -200,7 +195,6 @@ impl Runner for VitestRunner {
         parse::parse_vitest_json(&test_result, file_paths.to_vec())
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(
             file_paths,
@@ -225,7 +219,6 @@ impl Runner for VitestRunner {
 pub struct DenoRunner;
 
 impl Runner for DenoRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let language = tree_sitter_javascript::language();
         let mut files = Vec::new();
@@ -240,7 +233,6 @@ impl Runner for DenoRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -261,7 +253,6 @@ impl Runner for DenoRunner {
         )
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(file_paths, &["deno.json"])
     }
@@ -273,7 +264,6 @@ impl Runner for DenoRunner {
 pub struct NodeTestRunner;
 
 impl Runner for NodeTestRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let language = tree_sitter_javascript::language();
         let mut files = Vec::new();
@@ -288,7 +278,6 @@ impl Runner for NodeTestRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -311,7 +300,6 @@ impl Runner for NodeTestRunner {
         })
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(file_paths, &["package.json"])
     }

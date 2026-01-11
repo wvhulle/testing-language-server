@@ -139,7 +139,7 @@ mod tests {
         let target_file_path = "/home/demo/test/go/src/test/cases_test.go";
         let result =
             parse_go_test_json(&contents, workspace, &[target_file_path.to_string()]).unwrap();
-        let result = result.data.first().unwrap();
+        let result = result.files.first().unwrap();
         assert_eq!(result.path, target_file_path);
         let diagnostic = result.diagnostics.first().unwrap();
         assert_eq!(diagnostic.range.start.line, 30);

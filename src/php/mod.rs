@@ -81,7 +81,6 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 pub struct PhpunitRunner;
 
 impl Runner for PhpunitRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let mut files = Vec::new();
         for file_path in file_paths {
@@ -94,7 +93,6 @@ impl Runner for PhpunitRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -109,7 +107,6 @@ impl Runner for PhpunitRunner {
         Ok(parse::to_diagnostics(results))
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(
             file_paths,

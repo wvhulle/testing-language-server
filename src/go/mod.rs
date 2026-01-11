@@ -8,7 +8,7 @@ use tree_sitter::{Query, QueryCursor};
 
 use crate::{
     Diagnostics, DiscoveredTests, FileTests, MAX_CHAR_LENGTH, TestItem, Workspaces, error::LSError,
-    runner::Runner,
+    runner::Runner, workspace::detect_from_files,
 };
 
 const DISCOVER_QUERY: &str = include_str!("discover.scm");
@@ -30,10 +30,10 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
     let mut tests = Vec::new();
     let name_idx = query
         .capture_index_for_name("test.name")
-        .ok_or_else(|| LSError::TreeSitterParse)?;
+        .ok_or(LSError::TreeSitterParse)?;
     let def_idx = query
         .capture_index_for_name("test.definition")
-        .ok_or_else(|| LSError::TreeSitterParse)?;
+        .ok_or(LSError::TreeSitterParse)?;
 
     for m in matches {
         let mut name: Option<String> = None;
@@ -88,20 +88,18 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 pub struct GoTestRunner;
 
 impl Runner for GoTestRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let mut files = Vec::new();
         for file_path in file_paths {
             let tests = discover_tests(file_path)?;
             files.push(FileTests {
                 tests,
-                path: file_path.to_string(),
+                path: file_path.clone(),
             });
         }
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -122,9 +120,8 @@ impl Runner for GoTestRunner {
         )
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
-        crate::workspace::detect_from_files(file_paths, &["go.mod"])
+        detect_from_files(file_paths, &["go.mod"])
     }
 }
 

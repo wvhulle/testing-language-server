@@ -23,7 +23,7 @@ pub fn run_cargo_test(
     write_result_log("cargo_test.log", &output)?;
 
     if !output.stderr.is_empty() {
-        tracing::debug!(
+        log::debug!(
             "cargo test stderr: {}",
             String::from_utf8_lossy(&output.stderr)
         );

@@ -12,7 +12,7 @@ pub fn send<T>(message: &T) -> Result<(), LSError>
 where
     T: ?Sized + Serialize + std::fmt::Debug,
 {
-    tracing::info!("send stdout: {:#?}", message);
+    log::info!("send stdout: {:#?}", message);
     let msg = serde_json::to_string(message)?;
     let mut stdout = stdout().lock();
     write!(stdout, "Content-Length: {}\r\n\r\n{}", msg.len(), msg)?;

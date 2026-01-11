@@ -189,7 +189,7 @@ pub fn parse_libtest_json(
         let event: LibtestEvent = match serde_json::from_str(line) {
             Ok(e) => e,
             Err(e) => {
-                tracing::debug!("Failed to parse libtest JSON: {}, error: {}", line, e);
+                log::debug!("Failed to parse libtest JSON: {}, error: {}", line, e);
                 continue;
             }
         };
@@ -207,7 +207,7 @@ pub fn parse_libtest_json(
                 .iter()
                 .find(|item| item.id == *test_name || item.name == *test_name)
             else {
-                tracing::warn!("Could not find test item for failed test: {}", test_name);
+                log::warn!("Could not find test item for failed test: {}", test_name);
                 continue;
             };
 
@@ -337,10 +337,10 @@ mod tests {
             &test_items,
         );
 
-        assert_eq!(diagnostics.data.len(), 1);
-        assert_eq!(diagnostics.data[0].diagnostics.len(), 1);
+        assert_eq!(diagnostics.files.len(), 1);
+        assert_eq!(diagnostics.files[0].diagnostics.len(), 1);
         assert_eq!(
-            diagnostics.data[0].diagnostics[0].source,
+            diagnostics.files[0].diagnostics[0].source,
             Some("cargo-test".to_string())
         );
     }

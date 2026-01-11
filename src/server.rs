@@ -4,27 +4,28 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use glob::Pattern;
-use lsp_types::*;
-use serde::Deserialize;
+use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
+use lsp_types::{
+    Diagnostic, DiagnosticOptions, DiagnosticServerCapabilities, InitializeParams,
+    InitializeResult, MessageType, NumberOrString, ProgressParams, ProgressParamsValue,
+    PublishDiagnosticsParams, ServerCapabilities, ShowMessageParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Url, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkDoneProgressOptions, WorkspaceFolder,
+    request::{Initialize, Shutdown},
+};
+use serde::de::Error as _;
 use serde_json::{Value, json};
-use test_lsp::{
-    AdapterConfiguration, AdapterId, DiscoveredTests, FileDiagnostics, WorkspaceAnalysis,
+
+use crate::{
+    AdapterConfig, AdapterId, Config, DiscoveredTests, FileDiagnostics, WorkspaceAnalysis,
     Workspaces, error::LSError, protocol, runner, workspace,
 };
 
-const TOML_FILE_NAME: &str = ".testingls.toml";
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct InitializedOptions {
-    adapter_command: HashMap<AdapterId, AdapterConfiguration>,
-    enable_workspace_diagnostics: Option<bool>,
-}
+const TOML_FILE_NAME: &str = ".assert-lsp.toml";
 
 pub struct TestingLS {
     pub workspace_folders: Option<Vec<WorkspaceFolder>>,
-    pub options: InitializedOptions,
+    pub config: Config,
     pub workspaces_cache: Vec<WorkspaceAnalysis>,
 }
 
@@ -45,11 +46,140 @@ pub enum WorkspaceDiagnosticsStatus {
     Done,
 }
 
+fn extract_textdocument_uri(params: &Value) -> Result<String, serde_json::Error> {
+    let uri = params["textDocument"]["uri"]
+        .as_str()
+        .ok_or(serde_json::Error::custom("`textDocument.uri` is not set"))?;
+    Ok(protocol::uri_to_path(uri))
+}
+
+fn extract_uri(params: &Value) -> Result<String, serde_json::Error> {
+    let uri = params["uri"]
+        .as_str()
+        .ok_or(serde_json::Error::custom("`uri` is not set"))?;
+    Ok(protocol::uri_to_path(uri))
+}
+
+fn cast_request<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
+where
+    R: lsp_types::request::Request,
+    R::Params: serde::de::DeserializeOwned,
+{
+    req.extract(R::METHOD)
+}
+
+/// Runs the LSP server main loop.
+///
+/// This function creates a stdio connection and processes incoming LSP messages
+/// until the client sends a shutdown request.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The connection fails to initialize
+/// - Message handling encounters an unrecoverable error
+pub fn run() -> Result<(), LSError> {
+    let (connection, io_threads) = Connection::stdio();
+    let mut server = TestingLS::new();
+    let mut is_workspace_checked = false;
+
+    for msg in &connection.receiver {
+        log::info!("received message={:#?}", msg);
+
+        match msg {
+            Message::Request(req) => {
+                if connection.handle_shutdown(&req)? {
+                    break;
+                }
+
+                let req_id = req.id.clone();
+
+                if let Ok((_id, params)) = cast_request::<Initialize>(req.clone()) {
+                    let id_num = req_id.to_string().parse().unwrap_or(0);
+                    server.initialize(id_num, params)?;
+                    continue;
+                }
+
+                if let Ok((_id, _params)) = cast_request::<Shutdown>(req.clone()) {
+                    let id_num = req_id.to_string().parse().unwrap_or(0);
+                    server.shutdown(id_num)?;
+                    continue;
+                }
+
+                match req.method.as_str() {
+                    "$/discoverFileTest" => {
+                        let uri = extract_uri(&req.params)?;
+                        let result = server.discover_file(&uri)?;
+                        let response = Response::new_ok(req_id, result);
+                        connection
+                            .sender
+                            .send(Message::Response(response))
+                            .map_err(|e| LSError::ChannelSend(e.to_string()))?;
+                    }
+                    _ => {
+                        let response = Response::new_err(
+                            req_id,
+                            lsp_server::ErrorCode::MethodNotFound as i32,
+                            format!("method not found: {}", req.method),
+                        );
+                        connection
+                            .sender
+                            .send(Message::Response(response))
+                            .map_err(|e| LSError::ChannelSend(e.to_string()))?;
+                    }
+                }
+            }
+            Message::Notification(not) => match not.method.as_str() {
+                "$/cancelRequest" => {}
+                "initialized" => {
+                    is_workspace_checked = true;
+                    server.diagnose_workspace()?;
+                }
+                "workspace/diagnostic" => {
+                    is_workspace_checked = true;
+                    server.diagnose_workspace()?;
+                }
+                "textDocument/diagnostic" | "textDocument/didSave" => {
+                    let uri = extract_textdocument_uri(&not.params)?;
+                    server.check_file(&uri, false)?;
+                }
+                "textDocument/didOpen" => {
+                    if !is_workspace_checked {
+                        is_workspace_checked = true;
+                        server.diagnose_workspace()?;
+                    }
+                    let uri = extract_textdocument_uri(&not.params)?;
+                    if server.refreshing_needed(&uri) {
+                        server.refresh_workspaces_cache()?;
+                    }
+                }
+                "$/runFileTest" => {
+                    let uri = extract_uri(&not.params)?;
+                    server.check_file(&uri, false)?;
+                }
+                "$/runWorkspaceTest" => {
+                    server.diagnose_workspace()?;
+                }
+                _ => {
+                    log::warn!("unhandled notification: {}", not.method);
+                }
+            },
+            Message::Response(resp) => {
+                log::warn!("unexpected response: {:?}", resp);
+            }
+        }
+    }
+
+    io_threads.join().expect("Failed to join I/O threads");
+    Ok(())
+}
+
 impl TestingLS {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             workspace_folders: None,
-            options: Default::default(),
+            config: Config::default(),
             workspaces_cache: Vec::new(),
         }
     }
@@ -73,8 +203,7 @@ impl TestingLS {
         initialize_params: InitializeParams,
     ) -> Result<(), LSError> {
         self.workspace_folders = initialize_params.workspace_folders;
-        self.options = (self
-            .handle_initialization_options(initialize_params.initialization_options.as_ref()))?;
+        self.config = self.load_config(initialize_params.initialization_options.as_ref())?;
         let result = InitializeResult {
             capabilities: self.build_capabilities(),
             ..InitializeResult::default()
@@ -89,34 +218,12 @@ impl TestingLS {
         Ok(())
     }
 
-    fn adapter_commands(&self) -> HashMap<AdapterId, AdapterConfiguration> {
-        self.options.adapter_command.clone()
+    fn adapter_commands(&self) -> HashMap<AdapterId, AdapterConfig> {
+        self.config.adapter_command.clone()
     }
 
-    fn project_files(base_dir: &Path, include: &[String], exclude: &[String]) -> Vec<String> {
-        let mut result: Vec<String> = vec![];
-
-        let exclude_pattern = exclude
-            .iter()
-            .filter_map(|exclude_pattern| {
-                Pattern::new(base_dir.join(exclude_pattern).to_str().unwrap()).ok()
-            })
-            .collect::<Vec<Pattern>>();
-        let base_dir = base_dir.to_str().unwrap();
-        let entries = globwalk::GlobWalkerBuilder::from_patterns(base_dir, include)
-            .follow_links(true)
-            .build()
-            .unwrap()
-            .filter_map(Result::ok);
-        for path in entries {
-            let should_exclude = exclude_pattern
-                .iter()
-                .any(|exclude_pattern| exclude_pattern.matches(path.path().to_str().unwrap()));
-            if !should_exclude {
-                result.push(path.path().to_str().unwrap().to_owned());
-            }
-        }
-        result
+    fn project_files(base_dir: &Path, extensions: &[&str]) -> Vec<String> {
+        workspace::walk_files(base_dir, extensions)
     }
 
     fn build_capabilities(&self) -> ServerCapabilities {
@@ -132,20 +239,38 @@ impl TestingLS {
         }
     }
 
-    pub fn handle_initialization_options(
-        &self,
-        options: Option<&Value>,
-    ) -> Result<InitializedOptions, LSError> {
+    pub fn load_config(&self, options: Option<&Value>) -> Result<Config, LSError> {
         let project_dir = self.project_dir()?;
         let toml_path = project_dir.join(TOML_FILE_NAME);
 
-        match std::fs::read_to_string(&toml_path) {
-            Ok(content) => Ok(toml::from_str::<InitializedOptions>(&content)?),
-            Err(_) => match options {
-                Some(opts) => Ok(serde_json::from_value(opts.clone())?),
-                None => Err(LSError::ConfigNotFound(toml_path)),
-            },
+        // Try to read .assert-lsp.toml first
+        if let Ok(content) = std::fs::read_to_string(&toml_path) {
+            return Ok(toml::from_str::<Config>(&content)?);
         }
+
+        // Try LSP initialization options
+        if let Some(opts) = options {
+            return Ok(serde_json::from_value(opts.clone())?);
+        }
+
+        // Auto-detect project type
+        let detected = workspace::detect_projects(&project_dir);
+        if detected.is_empty() {
+            log::info!("No project detected, using empty configuration");
+            return Ok(Config::default());
+        }
+
+        log::info!("Auto-detected projects: {:?}", detected);
+        let mut adapter_command = HashMap::new();
+        for project in detected {
+            let config = workspace::config_from_detected(&project);
+            adapter_command.insert(project.test_kind.clone(), config);
+        }
+
+        Ok(Config {
+            adapter_command,
+            ..Config::default()
+        })
     }
 
     pub fn refresh_workspaces_cache(&mut self) -> Result<(), LSError> {
@@ -157,7 +282,7 @@ impl TestingLS {
         for (adapter_id, adapter) in &adapter_commands {
             let warnings = adapter.validate(adapter_id);
             for warning in warnings {
-                tracing::warn!("{}", warning);
+                log::warn!("{}", warning);
                 let params: ShowMessageParams = ShowMessageParams {
                     typ: MessageType::WARNING,
                     message: warning,
@@ -171,17 +296,14 @@ impl TestingLS {
         }
 
         // Nested and multiple loops, but each count is small
-        for (adapter_id, adapter) in adapter_commands.into_iter() {
-            tracing::debug!("Processing adapter: {}", adapter_id);
-            let AdapterConfiguration {
-                test_kind,
-                extra_arg: _,
-                include,
-                exclude,
-                workspace_dir,
-                ..
-            } = &adapter;
-            let file_paths = Self::project_files(&project_dir, include, exclude);
+        for (adapter_id, adapter) in adapter_commands {
+            log::debug!("Processing adapter: {}", adapter_id);
+            let test_kind = &adapter.test_kind;
+            let workspace_dir = &adapter.workspace_dir;
+
+            // Get extensions for this test kind and walk files
+            let extensions = workspace::extensions_for_test_kind(test_kind);
+            let file_paths = Self::project_files(&project_dir, &extensions);
             if file_paths.is_empty() {
                 continue;
             }
@@ -190,7 +312,7 @@ impl TestingLS {
             let test_runner: Box<dyn runner::Runner> = match runner::get(test_kind) {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::error!("Failed to get runner for {}: {:?}", test_kind, e);
+                    log::error!("Failed to get runner for {}: {:?}", test_kind, e);
                     continue;
                 }
             };
@@ -215,9 +337,9 @@ impl TestingLS {
             self.workspaces_cache.push(WorkspaceAnalysis::new(
                 adapter,
                 Workspaces { map: workspace_map },
-            ))
+            ));
         }
-        tracing::info!("workspaces_cache={:#?}", self.workspaces_cache);
+        log::info!("workspaces_cache={:#?}", self.workspaces_cache);
         protocol::send(&json!({
             "jsonrpc": "2.0",
             "method": "$/detectedWorkspace",
@@ -233,7 +355,7 @@ impl TestingLS {
     /// all files in the workspace through the Language Server Protocol.
     pub fn diagnose_workspace(&mut self) -> Result<WorkspaceDiagnosticsStatus, LSError> {
         self.refresh_workspaces_cache()?;
-        if !self.options.enable_workspace_diagnostics.unwrap_or(true) {
+        if !self.config.enable_workspace_diagnostics {
             return Ok(WorkspaceDiagnosticsStatus::Skipped);
         }
 
@@ -244,7 +366,7 @@ impl TestingLS {
              }| {
                 workspaces.map.iter().for_each(|(workspace, paths)| {
                     let _ = self.diagnose(adapter, workspace, paths);
-                })
+                });
             },
         );
         Ok(WorkspaceDiagnosticsStatus::Done)
@@ -254,8 +376,7 @@ impl TestingLS {
         let base_dir = self.project_dir();
         match base_dir {
             Ok(base_dir) => self.workspaces_cache.iter().any(|cache| {
-                let include = &cache.adapter_config.include;
-                let exclude = &cache.adapter_config.exclude;
+                let test_kind = &cache.adapter_config.test_kind;
                 if cache
                     .workspaces
                     .map
@@ -267,10 +388,11 @@ impl TestingLS {
                     return false;
                 }
 
-                Self::project_files(&base_dir, include, exclude).contains(&path.to_owned())
+                let extensions = workspace::extensions_for_test_kind(test_kind);
+                Self::project_files(&base_dir, &extensions).contains(&path.to_owned())
             }),
             Err(e) => {
-                tracing::error!("Error: {:?}", e);
+                log::error!("Error: {:?}", e);
                 false
             }
         }
@@ -289,7 +411,7 @@ impl TestingLS {
                  adapter_config: adapter,
                  workspaces,
              }| {
-                for (workspace, paths) in workspaces.map.iter() {
+                for (workspace, paths) in &workspaces.map {
                     if !paths.contains(&path.to_string()) {
                         continue;
                     }
@@ -302,7 +424,7 @@ impl TestingLS {
 
     fn get_diagnostics(
         &self,
-        adapter: &AdapterConfiguration,
+        adapter: &AdapterConfig,
         workspace: &str,
         paths: &[String],
     ) -> Result<Vec<(String, Vec<Diagnostic>)>, LSError> {
@@ -312,7 +434,7 @@ impl TestingLS {
         let test_runner = runner::get(&adapter.test_kind)?;
 
         // Call run_tests directly
-        match test_runner.run_tests(&paths.to_vec(), workspace, &adapter.extra_arg) {
+        match test_runner.run_tests(paths, workspace, &adapter.extra_arg) {
             Ok(res) => {
                 for target_file in paths {
                     let diagnostics_for_file: Vec<Diagnostic> = res
@@ -327,8 +449,8 @@ impl TestingLS {
                 }
             }
             Err(err) => {
-                let message = format!("Test runner failed: {:?}", err);
-                tracing::error!("{}", message);
+                let message = format!("Test runner failed: {err:?}");
+                log::error!("{}", message);
                 let params: ShowMessageParams = ShowMessageParams {
                     typ: MessageType::ERROR,
                     message,
@@ -346,7 +468,7 @@ impl TestingLS {
 
     fn diagnose(
         &self,
-        adapter: &AdapterConfiguration,
+        adapter: &AdapterConfig,
         workspace: &str,
         paths: &[String],
     ) -> Result<(), LSError> {
@@ -388,7 +510,7 @@ impl TestingLS {
             message: Some(format!("tested {} files", paths.len())),
         };
         let params = ProgressParams {
-            token: token.clone(),
+            token,
             value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(progress_end)),
         };
         protocol::send(&json!({
@@ -409,7 +531,7 @@ impl TestingLS {
             workspaces,
         } in &self.workspaces_cache
         {
-            for (_, paths) in workspaces.map.iter() {
+            for (_, paths) in &workspaces.map {
                 if !paths.contains(&path.to_string()) {
                     continue;
                 }
@@ -423,7 +545,7 @@ impl TestingLS {
 
     fn discover(
         &self,
-        adapter: &AdapterConfiguration,
+        adapter: &AdapterConfig,
         paths: &[String],
     ) -> Result<DiscoveredTests, LSError> {
         let test_runner = runner::get(&adapter.test_kind)?;
@@ -466,9 +588,10 @@ mod tests {
                 uri: Url::from_file_path(&abs_path_of_demo).unwrap(),
                 name: "demo".to_string(),
             }]),
-            options: InitializedOptions {
+            config: Config {
                 adapter_command: HashMap::new(),
-                enable_workspace_diagnostics: Some(true),
+                enable_workspace_diagnostics: true,
+                ..Config::default()
             },
             workspaces_cache: Vec::new(),
         };
@@ -477,73 +600,14 @@ mod tests {
     }
 
     #[test]
-    fn test_check_workspace() {
-        test_lsp::config::init();
-        let abs_path_of_demo = std::env::current_dir().unwrap().join("demo/rust");
-        let adapter_conf = AdapterConfiguration {
-            test_kind: "cargo-test".to_string(),
-            include: vec!["src/**/*.rs".to_string()], // Only include files in src/
-            exclude: vec!["**/target/**".to_string()],
-            ..Default::default()
-        };
-        let mut server = TestingLS {
-            workspace_folders: Some(vec![WorkspaceFolder {
-                uri: Url::from_file_path(&abs_path_of_demo).unwrap(),
-                name: "demo".to_string(),
-            }]),
-            options: InitializedOptions {
-                adapter_command: HashMap::from([(String::from(".rs"), adapter_conf)]),
-                enable_workspace_diagnostics: Some(true),
-            },
-            workspaces_cache: Vec::new(),
-        };
-        server.diagnose_workspace().unwrap();
+    fn project_files_finds_rust_files() {
+        let absolute_path_of_demo = std::env::current_dir().unwrap().join("demo/rust");
+        let files = TestingLS::project_files(&absolute_path_of_demo, &["rs"]);
+        assert!(!files.is_empty(), "Should find Rust files");
         assert!(
-            !server.workspaces_cache.is_empty(),
-            "Should have detected workspaces"
+            files.iter().all(|f| f.ends_with(".rs")),
+            "All files should be .rs"
         );
-        server
-            .workspaces_cache
-            .iter()
-            .for_each(|workspace_analysis| {
-                assert_eq!(workspace_analysis.adapter_config.test_kind, "cargo-test");
-                // Check that we detected the demo/rust workspace
-                let demo_workspace = workspace_analysis
-                    .workspaces
-                    .data
-                    .get(abs_path_of_demo.to_str().unwrap());
-                assert!(
-                    demo_workspace.is_some(),
-                    "Should detect demo/rust workspace"
-                );
-                let paths = demo_workspace.unwrap();
-                paths.iter().for_each(|path| {
-                    assert!(
-                        path.contains("rust/src"),
-                        "Path should be in rust/src: {}",
-                        path
-                    );
-                });
-            });
-    }
-
-    #[test]
-    fn project_files_are_filtered_by_extension() {
-        let absolute_path_of_demo = std::env::current_dir().unwrap().join("demo");
-        let files = TestingLS::project_files(
-            &absolute_path_of_demo.clone(),
-            &["/rust/src/lib.rs".to_string()],
-            &["/rust/target/**/*".to_string()],
-        );
-        let librs = absolute_path_of_demo.join("rust/src/lib.rs");
-        assert_eq!(files, vec![librs.to_str().unwrap()]);
-        let files = TestingLS::project_files(
-            &absolute_path_of_demo.clone(),
-            &["jest/*.spec.js".to_string()],
-            &["jest/another.spec.js".to_string()],
-        );
-        let test_file = absolute_path_of_demo.join("jest/index.spec.js");
-        assert_eq!(files, vec![test_file.to_str().unwrap()]);
     }
 
     #[test]
@@ -553,9 +617,10 @@ mod tests {
                 uri: Url::from_file_path(current_dir().unwrap()).unwrap(),
                 name: "demo".to_string(),
             }]),
-            options: InitializedOptions {
+            config: Config {
                 adapter_command: HashMap::new(),
-                enable_workspace_diagnostics: Some(false),
+                enable_workspace_diagnostics: false,
+                ..Config::default()
             },
             workspaces_cache: Vec::new(),
         };

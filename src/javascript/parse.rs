@@ -308,7 +308,7 @@ pub fn parse_node_test_xml(output: &str, target_file_paths: &[String]) -> Vec<Re
             }
             Ok(XmlEvent::EndDocument) => break,
             Err(e) => {
-                tracing::error!("XML parse error: {e}");
+                log::error!("XML parse error: {e}");
                 break;
             }
             _ => {}

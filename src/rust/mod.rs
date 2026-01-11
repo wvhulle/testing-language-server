@@ -164,7 +164,6 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 pub struct CargoTestRunner;
 
 impl Runner for CargoTestRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         let mut files = Vec::new();
         for file_path in file_paths {
@@ -177,7 +176,6 @@ impl Runner for CargoTestRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -203,7 +201,6 @@ impl Runner for CargoTestRunner {
         ))
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(file_paths, &["Cargo.toml"])
     }
@@ -213,7 +210,6 @@ impl Runner for CargoTestRunner {
 pub struct CargoNextestRunner;
 
 impl Runner for CargoNextestRunner {
-    #[tracing::instrument(skip(self))]
     fn discover(&self, file_paths: &[String]) -> Result<DiscoveredTests, LSError> {
         // Nextest uses the same test discovery as cargo test
         let mut files = Vec::new();
@@ -227,7 +223,6 @@ impl Runner for CargoNextestRunner {
         Ok(DiscoveredTests { files })
     }
 
-    #[tracing::instrument(skip(self))]
     fn run_tests(
         &self,
         file_paths: &[String],
@@ -264,7 +259,6 @@ impl Runner for CargoNextestRunner {
         ))
     }
 
-    #[tracing::instrument(skip(self))]
     fn detect_workspaces(&self, file_paths: &[String]) -> Workspaces {
         crate::workspace::detect_from_files(file_paths, &["Cargo.toml"])
     }
