@@ -66,6 +66,7 @@ name = "assert-lsp"
 version = "0.0.1"
 dependencies = [
  "clap",
+ "crossbeam-channel",
  "dirs",
  "env_logger",
  "ignore",

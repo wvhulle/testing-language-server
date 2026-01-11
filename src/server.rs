@@ -4,21 +4,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
+use crossbeam_channel::Sender;
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::{
-    Diagnostic, DiagnosticOptions, DiagnosticServerCapabilities, InitializeParams,
-    InitializeResult, MessageType, NumberOrString, ProgressParams, ProgressParamsValue,
-    PublishDiagnosticsParams, ServerCapabilities, ShowMessageParams, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkDoneProgressOptions, WorkspaceFolder,
-    request::{Initialize, Shutdown},
+    Diagnostic, DiagnosticOptions, DiagnosticServerCapabilities, InitializeParams, MessageType,
+    NumberOrString, ProgressParams, ProgressParamsValue, PublishDiagnosticsParams,
+    ServerCapabilities, ShowMessageParams, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
+    WorkDoneProgressOptions, WorkspaceFolder,
 };
 use serde::de::Error as _;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::{
     AdapterConfig, AdapterId, Config, DiscoveredTests, FileDiagnostics, WorkspaceAnalysis,
-    Workspaces, error::LSError, protocol, runner, workspace,
+    Workspaces, error::LSError, runner, workspace,
 };
 
 const TOML_FILE_NAME: &str = ".assert-lsp.toml";
@@ -27,45 +27,25 @@ pub struct TestingLS {
     pub workspace_folders: Option<Vec<WorkspaceFolder>>,
     pub config: Config,
     pub workspaces_cache: Vec<WorkspaceAnalysis>,
+    sender: Sender<Message>,
 }
 
-impl Default for TestingLS {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// The status of workspace diagnostics
-/// - Skipped: Skip workspace diagnostics (when `enable_workspace_diagnostics`
-///   is false)
-/// - Done: Finish workspace diagnostics (when `enable_workspace_diagnostics` is
-///   true)
-#[derive(Debug, PartialEq, Eq)]
-pub enum WorkspaceDiagnosticsStatus {
-    Skipped,
-    Done,
+fn uri_to_path(uri: &str) -> String {
+    uri.replace("file://", "")
 }
 
 fn extract_textdocument_uri(params: &Value) -> Result<String, serde_json::Error> {
     let uri = params["textDocument"]["uri"]
         .as_str()
         .ok_or(serde_json::Error::custom("`textDocument.uri` is not set"))?;
-    Ok(protocol::uri_to_path(uri))
+    Ok(uri_to_path(uri))
 }
 
 fn extract_uri(params: &Value) -> Result<String, serde_json::Error> {
     let uri = params["uri"]
         .as_str()
         .ok_or(serde_json::Error::custom("`uri` is not set"))?;
-    Ok(protocol::uri_to_path(uri))
-}
-
-fn cast_request<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
-where
-    R: lsp_types::request::Request,
-    R::Params: serde::de::DeserializeOwned,
-{
-    req.extract(R::METHOD)
+    Ok(uri_to_path(uri))
 }
 
 /// Runs the LSP server main loop.
@@ -80,31 +60,36 @@ where
 /// - Message handling encounters an unrecoverable error
 pub fn run() -> Result<(), LSError> {
     let (connection, io_threads) = Connection::stdio();
-    let mut server = TestingLS::new();
+    let mut server = TestingLS::new(connection.sender.clone());
     let mut is_workspace_checked = false;
 
-    for msg in &connection.receiver {
-        log::info!("received message={:#?}", msg);
+    // Handle initialization using lsp-server's built-in method
+    let (id, params) = connection.initialize_start()?;
+    let init_params: InitializeParams = serde_json::from_value(params)?;
+    server.workspace_folders = init_params.workspace_folders;
+    server.config = server.load_config(init_params.initialization_options.as_ref())?;
 
+    let initialize_data = serde_json::json!({
+        "capabilities": server.build_capabilities(),
+    });
+    connection.initialize_finish(id, initialize_data)?;
+    log::info!("Server initialized");
+
+    // Run initial workspace diagnostics immediately after initialization
+    log::info!("Running initial workspace diagnostics");
+    server.diagnose_workspace()?;
+
+    for msg in &connection.receiver {
+        log::debug!("Received message: {:?}", msg);
         match msg {
             Message::Request(req) => {
+                // lsp-server's handle_shutdown handles "shutdown" method
+                // and sends the response. Returns true when we should exit.
                 if connection.handle_shutdown(&req)? {
                     break;
                 }
 
                 let req_id = req.id.clone();
-
-                if let Ok((_id, params)) = cast_request::<Initialize>(req.clone()) {
-                    let id_num = req_id.to_string().parse().unwrap_or(0);
-                    server.initialize(id_num, params)?;
-                    continue;
-                }
-
-                if let Ok((_id, _params)) = cast_request::<Shutdown>(req.clone()) {
-                    let id_num = req_id.to_string().parse().unwrap_or(0);
-                    server.shutdown(id_num)?;
-                    continue;
-                }
 
                 match req.method.as_str() {
                     "$/discoverFileTest" => {
@@ -130,12 +115,13 @@ pub fn run() -> Result<(), LSError> {
                 }
             }
             Message::Notification(not) => match not.method.as_str() {
-                "$/cancelRequest" => {}
-                "initialized" => {
-                    is_workspace_checked = true;
-                    server.diagnose_workspace()?;
+                "exit" => {
+                    log::info!("Received exit notification");
+                    break;
                 }
-                "workspace/diagnostic" => {
+                "$/cancelRequest" => {}
+                "initialized" | "workspace/diagnostic" | "$/runWorkspaceTest" => {
+                    log::info!("Received notification: {}", not.method);
                     is_workspace_checked = true;
                     server.diagnose_workspace()?;
                 }
@@ -157,65 +143,67 @@ pub fn run() -> Result<(), LSError> {
                     let uri = extract_uri(&not.params)?;
                     server.check_file(&uri, false)?;
                 }
-                "$/runWorkspaceTest" => {
-                    server.diagnose_workspace()?;
-                }
                 _ => {
                     log::warn!("unhandled notification: {}", not.method);
                 }
             },
             Message::Response(resp) => {
-                log::warn!("unexpected response: {:?}", resp);
+                log::warn!("unexpected response: {resp:?}");
             }
         }
     }
 
+    // Drop the connection before joining threads to signal them to exit
+    drop(connection);
     io_threads.join().expect("Failed to join I/O threads");
     Ok(())
 }
 
 impl TestingLS {
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(sender: Sender<Message>) -> Self {
         Self {
             workspace_folders: None,
             config: Config::default(),
             workspaces_cache: Vec::new(),
+            sender,
         }
+    }
+
+    /// Send an LSP notification through the channel
+    fn send_notification<P: serde::Serialize>(
+        &self,
+        method: &str,
+        params: P,
+    ) -> Result<(), LSError> {
+        let notification = Notification::new(method.to_string(), params);
+        self.sender
+            .send(Message::Notification(notification))
+            .map_err(|e| LSError::ChannelSend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Send an LSP request through the channel (for progress notifications)
+    fn send_request<P: serde::Serialize>(
+        &self,
+        id: i32,
+        method: &str,
+        params: P,
+    ) -> Result<(), LSError> {
+        let request = Request::new(RequestId::from(id), method.to_string(), params);
+        self.sender
+            .send(Message::Request(request))
+            .map_err(|e| LSError::ChannelSend(e.to_string()))?;
+        Ok(())
     }
 
     fn project_dir(&self) -> Result<PathBuf, LSError> {
-        if let Ok(cwd) = current_dir() {
-            Ok(cwd)
-        } else {
-            let folders = self
-                .workspace_folders
-                .as_ref()
-                .ok_or(LSError::NoWorkspaceFolders)?;
-            let uri = &folders[0].uri;
-            Ok(uri.to_file_path().unwrap())
+        // Prioritize workspace folders sent by the LSP client
+        if let Some(first_folder) = self.workspace_folders.as_ref().and_then(|f| f.first()) {
+            return Ok(first_folder.uri.to_file_path().unwrap());
         }
-    }
-
-    pub fn initialize(
-        &mut self,
-        id: i64,
-        initialize_params: InitializeParams,
-    ) -> Result<(), LSError> {
-        self.workspace_folders = initialize_params.workspace_folders;
-        self.config = self.load_config(initialize_params.initialization_options.as_ref())?;
-        let result = InitializeResult {
-            capabilities: self.build_capabilities(),
-            ..InitializeResult::default()
-        };
-
-        protocol::send(&json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": result,
-        }))?;
-
-        Ok(())
+        // Fall back to current directory
+        current_dir().map_err(|_| LSError::NoWorkspaceFolders)
     }
 
     fn adapter_commands(&self) -> HashMap<AdapterId, AdapterConfig> {
@@ -283,15 +271,11 @@ impl TestingLS {
             let warnings = adapter.validate(adapter_id);
             for warning in warnings {
                 log::warn!("{}", warning);
-                let params: ShowMessageParams = ShowMessageParams {
+                let params = ShowMessageParams {
                     typ: MessageType::WARNING,
                     message: warning,
                 };
-                let _ = protocol::send(&json!({
-                    "jsonrpc": "2.0",
-                    "method": "window/showMessage",
-                    "params": params,
-                }));
+                let _ = self.send_notification("window/showMessage", params);
             }
         }
 
@@ -340,36 +324,31 @@ impl TestingLS {
             ));
         }
         log::info!("workspaces_cache={:#?}", self.workspaces_cache);
-        protocol::send(&json!({
-            "jsonrpc": "2.0",
-            "method": "$/detectedWorkspace",
-            "params": self.workspaces_cache,
-        }))?;
+        self.send_notification("$/detectedWorkspace", &self.workspaces_cache)?;
         Ok(())
     }
 
-    /// Diagnoses the entire workspace for diagnostics.
-    /// This function will refresh the workspace cache, check if workspace
-    /// diagnostics are enabled, and then iterate through all workspaces to
-    /// diagnose them. It will trigger the publication of diagnostics for
-    /// all files in the workspace through the Language Server Protocol.
-    pub fn diagnose_workspace(&mut self) -> Result<WorkspaceDiagnosticsStatus, LSError> {
+    /// Diagnoses the entire workspace for test failures.
+    /// Refreshes the workspace cache and runs tests for all detected
+    /// workspaces, publishing diagnostics for any failures found.
+    pub fn diagnose_workspace(&mut self) -> Result<(), LSError> {
+        log::info!("diagnose_workspace: starting");
         self.refresh_workspaces_cache()?;
-        if !self.config.enable_workspace_diagnostics {
-            return Ok(WorkspaceDiagnosticsStatus::Skipped);
-        }
 
-        self.workspaces_cache.iter().for_each(
-            |WorkspaceAnalysis {
-                 adapter_config: adapter,
-                 workspaces,
-             }| {
-                workspaces.map.iter().for_each(|(workspace, paths)| {
-                    let _ = self.diagnose(adapter, workspace, paths);
-                });
-            },
+        log::info!(
+            "diagnose_workspace: processing {} workspace caches",
+            self.workspaces_cache.len()
         );
-        Ok(WorkspaceDiagnosticsStatus::Done)
+        for WorkspaceAnalysis {
+            adapter_config: adapter,
+            workspaces,
+        } in &self.workspaces_cache
+        {
+            for (workspace, paths) in &workspaces.map {
+                let _ = self.diagnose(adapter, workspace, paths);
+            }
+        }
+        Ok(())
     }
 
     pub fn refreshing_needed(&self, path: &str) -> bool {
@@ -430,12 +409,28 @@ impl TestingLS {
     ) -> Result<Vec<(String, Vec<Diagnostic>)>, LSError> {
         let mut diagnostics: Vec<(String, Vec<Diagnostic>)> = vec![];
 
+        log::info!(
+            "get_diagnostics: adapter={:?}, workspace={}, paths={:?}",
+            adapter.test_kind,
+            workspace,
+            paths
+        );
+
         // Get the runner for this test kind
         let test_runner = runner::get(&adapter.test_kind)?;
 
         // Call run_tests directly
+        log::info!("Running tests with runner: {}", adapter.test_kind);
         match test_runner.run_tests(paths, workspace, &adapter.extra_arg) {
             Ok(res) => {
+                log::info!("Test runner returned {} file results", res.files.len());
+                for file_result in &res.files {
+                    log::debug!(
+                        "File result: path={}, diagnostics={}",
+                        file_result.path,
+                        file_result.diagnostics.len()
+                    );
+                }
                 for target_file in paths {
                     let diagnostics_for_file: Vec<Diagnostic> = res
                         .files
@@ -444,6 +439,11 @@ impl TestingLS {
                         .filter(|FileDiagnostics { path, .. }| *path == *target_file)
                         .flat_map(|FileDiagnostics { diagnostics, .. }| diagnostics)
                         .collect();
+                    log::info!(
+                        "Diagnostics for {}: {} items",
+                        target_file,
+                        diagnostics_for_file.len()
+                    );
                     let uri = Url::from_file_path(target_file.replace("file://", "")).unwrap();
                     diagnostics.push((uri.to_string(), diagnostics_for_file));
                 }
@@ -451,16 +451,11 @@ impl TestingLS {
             Err(err) => {
                 let message = format!("Test runner failed: {err:?}");
                 log::error!("{}", message);
-                let params: ShowMessageParams = ShowMessageParams {
+                let params = ShowMessageParams {
                     typ: MessageType::ERROR,
                     message,
                 };
-                protocol::send(&json!({
-                    "jsonrpc": "2.0",
-                    "method": "window/showMessage",
-                    "params": params,
-                }))
-                .unwrap();
+                let _ = self.send_notification("window/showMessage", params);
             }
         }
         Ok(diagnostics)
@@ -476,13 +471,7 @@ impl TestingLS {
         let progress_token = WorkDoneProgressCreateParams {
             token: token.clone(),
         };
-        protocol::send(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "window/workDoneProgress/create",
-            "params": progress_token,
-        }))
-        .unwrap();
+        self.send_request(1, "window/workDoneProgress/create", progress_token)?;
         let progress_begin = WorkDoneProgressBegin {
             title: "Testing".to_string(),
             cancellable: Some(false),
@@ -493,12 +482,7 @@ impl TestingLS {
             token: token.clone(),
             value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(progress_begin)),
         };
-        protocol::send(&json!({
-            "jsonrpc": "2.0",
-            "method": "$/progress",
-            "params": params,
-        }))
-        .unwrap();
+        self.send_notification("$/progress", params)?;
         let diagnostics = self.get_diagnostics(adapter, workspace, paths)?;
         for (path, diagnostics) in diagnostics {
             self.send_diagnostics(
@@ -513,12 +497,7 @@ impl TestingLS {
             token,
             value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(progress_end)),
         };
-        protocol::send(&json!({
-            "jsonrpc": "2.0",
-            "method": "$/progress",
-            "params": params,
-        }))
-        .unwrap();
+        self.send_notification("$/progress", params)?;
         Ok(())
     }
 
@@ -554,21 +533,7 @@ impl TestingLS {
 
     pub fn send_diagnostics(&self, uri: Url, diagnostics: Vec<Diagnostic>) -> Result<(), LSError> {
         let params = PublishDiagnosticsParams::new(uri, diagnostics, None);
-        protocol::send(&json!({
-            "jsonrpc": "2.0",
-            "method": "textDocument/publishDiagnostics",
-            "params": params,
-        }))?;
-        Ok(())
-    }
-
-    pub fn shutdown(&self, id: i64) -> Result<(), LSError> {
-        protocol::send(&json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": null
-        }))?;
-        Ok(())
+        self.send_notification("textDocument/publishDiagnostics", params)
     }
 }
 
@@ -582,6 +547,7 @@ mod tests {
 
     #[test]
     fn test_check_file() {
+        let (sender, _receiver) = crossbeam_channel::unbounded();
         let abs_path_of_demo = std::env::current_dir().unwrap().join("demo/rust");
         let mut server = TestingLS {
             workspace_folders: Some(vec![WorkspaceFolder {
@@ -590,12 +556,12 @@ mod tests {
             }]),
             config: Config {
                 adapter_command: HashMap::new(),
-                enable_workspace_diagnostics: true,
                 ..Config::default()
             },
             workspaces_cache: Vec::new(),
+            sender,
         };
-        let librs = abs_path_of_demo.join("lib.rs");
+        let librs = abs_path_of_demo.join("src/lib.rs");
         server.check_file(librs.to_str().unwrap(), true).unwrap();
     }
 
@@ -608,23 +574,5 @@ mod tests {
             files.iter().all(|f| f.ends_with(".rs")),
             "All files should be .rs"
         );
-    }
-
-    #[test]
-    fn skip_workspace_diagnostics() {
-        let mut server = TestingLS {
-            workspace_folders: Some(vec![WorkspaceFolder {
-                uri: Url::from_file_path(current_dir().unwrap()).unwrap(),
-                name: "demo".to_string(),
-            }]),
-            config: Config {
-                adapter_command: HashMap::new(),
-                enable_workspace_diagnostics: false,
-                ..Config::default()
-            },
-            workspaces_cache: Vec::new(),
-        };
-        let status = server.diagnose_workspace().unwrap();
-        assert_eq!(status, WorkspaceDiagnosticsStatus::Skipped);
     }
 }

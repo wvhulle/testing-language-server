@@ -34,8 +34,6 @@ vim.lsp.start({ name = "assert-lsp", cmd = { "assert-lsp" }, root_dir = vim.fn.g
 Optional `.assert-lsp.toml` in project root:
 
 ```toml
-enable_workspace_diagnostics = true
-
 [adapter_command.cargo-test]
 test_kind = "cargo-test"
 extra_arg = ["--workspace"]

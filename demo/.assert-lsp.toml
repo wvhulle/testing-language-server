@@ -1,5 +1,3 @@
-enable_workspace_diagnostics = true
-
 [adapter_command.cargo-test]
 exclude = ["/**/target/**"]
 extra_arg = []

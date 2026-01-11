@@ -1,8 +1,0 @@
-enableWorkspaceDiagnostics = true
-
-[adapterCommand.rust]
-exclude = ["/demo/**/*", "/target/**/*"]
-extra_arg = ["--workspace"]
-include = ["/**/*.rs"]
-test_kind = "cargo-test"
-workspace_dir = "."

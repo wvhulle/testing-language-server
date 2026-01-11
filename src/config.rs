@@ -74,19 +74,10 @@ pub struct Config {
     #[serde(default = "default_cache_dir")]
     pub cache_dir: String,
 
-    /// Enable workspace-wide diagnostics
-    #[arg(long, default_value_t = true)]
-    #[serde(default = "default_true")]
-    pub enable_workspace_diagnostics: bool,
-
     /// Adapter configurations per test kind
     #[arg(skip)]
     #[serde(default)]
     pub adapter_command: HashMap<AdapterId, AdapterConfig>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_log_dir() -> String {
