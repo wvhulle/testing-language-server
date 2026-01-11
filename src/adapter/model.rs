@@ -1,7 +1,6 @@
 use crate::adapter::runner::{
-    cargo_nextest::CargoNextestRunner, cargo_test::CargoTestRunner, deno::DenoRunner,
-    go::GoTestRunner, jest::JestRunner, node_test::NodeTestRunner, phpunit::PhpunitRunner,
-    vitest::VitestRunner,
+    cargo_test::CargoTestRunner, deno::DenoRunner, go::GoTestRunner, jest::JestRunner,
+    node_test::NodeTestRunner, phpunit::PhpunitRunner, vitest::VitestRunner,
 };
 use crate::error::LSError;
 use crate::spec::{DetectWorkspaceArgs, DiscoverArgs, RunFileTestArgs};
@@ -15,7 +14,6 @@ pub trait Runner: Send + Sync {
 pub fn get_runner(test_kind: &str) -> Result<Box<dyn Runner>, LSError> {
     match test_kind {
         "cargo-test" => Ok(Box::new(CargoTestRunner)),
-        "cargo-nextest" => Ok(Box::new(CargoNextestRunner)),
         "jest" => Ok(Box::new(JestRunner)),
         "vitest" => Ok(Box::new(VitestRunner)),
         "deno" => Ok(Box::new(DenoRunner)),

@@ -5,21 +5,21 @@ use std::process::Output;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use crate::spec::{DetectWorkspaceResult, FileDiagnostics, TestItem};
-use crate::{error::LSError, spec::RunFileTestResult};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use regex::Regex;
 use serde::Serialize;
 use tree_sitter::{Language, Point, Query, QueryCursor};
 
-pub struct DiscoverWithTSOption {}
+use crate::error::LSError;
+use crate::spec::{DetectWorkspaceResult, FileDiagnostics, TestItem};
 
 pub static LOG_LOCATION: LazyLock<PathBuf> = LazyLock::new(|| {
-    let home_dir = dirs::home_dir().unwrap();
-    home_dir.join(".config/testing_language_server/adapter/")
+    dirs::home_dir()
+        .unwrap()
+        .join(".config/testing_language_server/adapter/")
 });
 
-// If the character value is greater than the line length it defaults back to the line length.
+/// If the character value is greater than the line length it defaults back to the line length.
 pub const MAX_CHAR_LENGTH: u32 = 10000;
 
 #[derive(Debug)]
@@ -30,20 +30,19 @@ pub struct ResultFromXml {
     pub col: u32,
 }
 
-#[allow(clippy::from_over_into)]
-impl Into<FileDiagnostics> for ResultFromXml {
-    fn into(self) -> FileDiagnostics {
+impl From<ResultFromXml> for FileDiagnostics {
+    fn from(result: ResultFromXml) -> Self {
         FileDiagnostics {
-            path: self.path,
+            path: result.path,
             diagnostics: vec![Diagnostic {
-                message: self.message,
+                message: result.message,
                 range: Range {
                     start: Position {
-                        line: self.line - 1,
-                        character: self.col - 1,
+                        line: result.line - 1,
+                        character: result.col - 1,
                     },
                     end: Position {
-                        line: self.line - 1,
+                        line: result.line - 1,
                         character: MAX_CHAR_LENGTH,
                     },
                 },
@@ -54,20 +53,16 @@ impl Into<FileDiagnostics> for ResultFromXml {
     }
 }
 
-/// determine if a particular file is the root of workspace based on whether it is in the same directory
+/// Determine if a particular file is the root of workspace based on marker files.
 fn detect_workspace_from_file(file_path: PathBuf, file_names: &[String]) -> Option<String> {
-    let parent = file_path.parent();
-    if let Some(parent) = parent {
-        if file_names
-            .iter()
-            .any(|file_name| parent.join(file_name).exists())
-        {
-            return Some(parent.to_string_lossy().to_string());
-        } else {
-            detect_workspace_from_file(parent.to_path_buf(), file_names)
-        }
+    let parent = file_path.parent()?;
+    if file_names
+        .iter()
+        .any(|file_name| parent.join(file_name).exists())
+    {
+        Some(parent.to_string_lossy().to_string())
     } else {
-        None
+        detect_workspace_from_file(parent.to_path_buf(), file_names)
     }
 }
 
@@ -78,19 +73,19 @@ pub fn detect_workspaces_from_file_list(
     let mut result_map: HashMap<String, Vec<String>> = HashMap::new();
     let mut file_paths = target_file_paths.to_vec();
     file_paths.sort_by_key(|b| b.len());
+
     for file_path in file_paths {
         let existing_workspace = result_map
             .iter()
             .find(|(workspace_root, _)| file_path.contains(workspace_root.as_str()));
+
         if let Some((workspace_root, _)) = existing_workspace {
             result_map
                 .entry(workspace_root.to_string())
                 .or_default()
                 .push(file_path.clone());
         }
-        // Push the file path to the found workspace even if existing_workspace becomes Some.
-        // In some cases, a simple way to find a workspace,
-        // such as the relationship between the project root and the adapter crate in this repository, may not work.
+
         let workspace =
             detect_workspace_from_file(PathBuf::from_str(&file_path).unwrap(), file_names);
         if let Some(workspace) = workspace {
@@ -106,6 +101,7 @@ pub fn detect_workspaces_from_file_list(
             }
         }
     }
+
     DetectWorkspaceResult { data: result_map }
 }
 
@@ -118,49 +114,41 @@ where
     Ok(())
 }
 
+pub fn write_result_log(file_name: &str, output: &Output) -> io::Result<()> {
+    let stdout = String::from_utf8(output.stdout.clone()).unwrap_or_default();
+    let stderr = String::from_utf8(output.stderr.clone()).unwrap_or_default();
+    let content = format!("stdout:\n{}\nstderr:\n{}", stdout, stderr);
+    let log_path = LOG_LOCATION.join(file_name);
+    std::fs::write(&log_path, content)?;
+    Ok(())
+}
+
 pub fn clean_ansi(input: &str) -> String {
     let re = Regex::new(r"\x1B\[([0-9]{1,2}(;[0-9]{1,2})*)?[m|K]").unwrap();
     re.replace_all(input, "").to_string()
 }
 
-pub fn discover_rust_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
-    // from https://github.com/rouge8/neotest-rust/blob/0418811e1e3499b2501593f2e131d02f5e6823d4/lua/neotest-rust/init.lua#L167
-    // license: https://github.com/rouge8/neotest-rust/blob/0418811e1e3499b2501593f2e131d02f5e6823d4/LICENSE
-    let query = r#"
-        (
-  (attribute_item
-    [
-      (attribute
-        (identifier) @macro_name
-      )
-      (attribute
-        [
-	  (identifier) @macro_name
-	  (scoped_identifier
-	    name: (identifier) @macro_name
-          )
-        ]
-      )
-    ]
-  )
-  [
-  (attribute_item
-    (attribute
-      (identifier)
-    )
-  )
-  (line_comment)
-  ]*
-  .
-  (function_item
-    name: (identifier) @test.name
-  ) @test.definition
-  (#any-of? @macro_name "test" "rstest" "case")
+pub fn resolve_path(base_dir: &Path, relative_path: &str) -> PathBuf {
+    let absolute = if Path::new(relative_path).is_absolute() {
+        PathBuf::from(relative_path)
+    } else {
+        base_dir.join(relative_path)
+    };
 
-)
-(mod_item name: (identifier) @namespace.name)? @namespace.definition
-"#;
-    discover_with_treesitter(file_path, &tree_sitter_rust::language(), query)
+    let mut components = Vec::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            std::path::Component::Normal(_) | std::path::Component::RootDir => {
+                components.push(component);
+            }
+            _ => {}
+        }
+    }
+
+    PathBuf::from_iter(components)
 }
 
 pub fn discover_with_treesitter(
@@ -172,7 +160,7 @@ pub fn discover_with_treesitter(
     let mut test_items: Vec<TestItem> = vec![];
     parser
         .set_language(language)
-        .expect("Error loading Rust grammar");
+        .expect("Error loading grammar");
     let source_code = std::fs::read_to_string(file_path)?;
     let tree = parser.parse(&source_code, None).unwrap();
     let query = Query::new(language, query).expect("Error creating query");
@@ -201,7 +189,6 @@ pub fn discover_with_treesitter(
                 "namespace.name" => {
                     let current_namespace = namespace_position_stack.first();
                     if let Some((ns_start, ns_end)) = current_namespace {
-                        // In namespace definition
                         if start_position.row >= ns_start.row
                             && end_position.row <= ns_end.row
                             && !namespace_name.is_empty()
@@ -272,150 +259,4 @@ pub fn discover_with_treesitter(
     }
 
     Ok(test_items)
-}
-
-pub fn parse_cargo_diagnostics(
-    contents: &str,
-    workspace_root: PathBuf,
-    file_paths: &[String],
-    test_items: &[TestItem],
-) -> RunFileTestResult {
-    let contents = contents.replace("\r\n", "\n");
-    let lines = contents.lines();
-    let mut result_map: HashMap<String, Vec<Diagnostic>> = HashMap::new();
-    for (i, line) in lines.clone().enumerate() {
-        // Example:
-        // thread 'server::tests::test_panic' panicked at src/server.rs:584:9:
-        let re = Regex::new(r"thread '([^']+)' panicked at ([^:]+):(\d+):(\d+):").unwrap();
-        if let Some(m) = re.captures(line) {
-            let mut message = String::new();
-            // <filename>::<id>
-            let id_with_file = m.get(1).unwrap().as_str().to_string();
-
-            // relaive path
-            let relative_file_path = m.get(2).unwrap().as_str().to_string();
-
-            if let Some(file_path) = file_paths.iter().find(|path| {
-                path.contains(workspace_root.join(&relative_file_path).to_str().unwrap())
-            }) {
-                let matched_test_item = test_items.iter().find(|item| {
-                    let item_path = item.path.strip_prefix(workspace_root.to_str().unwrap()).unwrap_or(&item.path);
-                    let item_path = item_path.strip_suffix(".rs").unwrap_or(item_path);
-                    let item_path = item_path.replace('/', "::")
-                        .replace("::src::lib", "")
-                        .replace("::src::main", "")
-                        .replace("::src::", "");
-                    let exact_id = format!("{}::{}", item_path, item.id);
-                    tracing::info!("DEBUGPRINT[7]: util.rs:301: item_path={:#?}, exact_id={:#?}, id_with_file={:#?}", item_path, exact_id, id_with_file);
-                    exact_id == id_with_file
-                });
-
-                let lnum = m.get(3).unwrap().as_str().parse::<u32>().unwrap() - 1;
-                let col = m.get(4).unwrap().as_str().parse::<u32>().unwrap() - 1;
-                let mut next_i = i + 1;
-                while next_i < lines.clone().count()
-                    && !lines.clone().nth(next_i).unwrap().is_empty()
-                {
-                    message = format!("{}{}\n", message, lines.clone().nth(next_i).unwrap());
-                    next_i += 1;
-                }
-                let diagnostic = Diagnostic {
-                    range: Range {
-                        start: Position {
-                            line: lnum,
-                            character: col,
-                        },
-                        end: Position {
-                            line: lnum,
-                            character: MAX_CHAR_LENGTH,
-                        },
-                    },
-                    message: message.clone(),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    ..Diagnostic::default()
-                };
-
-                // if the test item is matched,
-                // add a diagnostic to the beginning of the test item
-                // in order to show which test failed.
-                // If this code does not exist, only panicked positions are shown
-                if let Some(test_item) = matched_test_item {
-                    let message = format!(
-                        "`{}` failed at {relative_file_path}:{lnum}:{col}\nMessage:\n{message}",
-                        test_item.name
-                    );
-                    let lnum = test_item.start_position.start.line;
-                    let col = test_item.start_position.start.character;
-                    let diagnostic = Diagnostic {
-                        range: Range {
-                            start: Position {
-                                line: lnum,
-                                character: col,
-                            },
-                            end: Position {
-                                line: lnum,
-                                character: MAX_CHAR_LENGTH,
-                            },
-                        },
-                        message,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        ..Diagnostic::default()
-                    };
-                    result_map
-                        .entry(test_item.path.to_string())
-                        .or_default()
-                        .push(diagnostic);
-                }
-                result_map
-                    .entry(file_path.to_string())
-                    .or_default()
-                    .push(diagnostic);
-            } else {
-                continue;
-            }
-        }
-    }
-
-    let data = result_map
-        .into_iter()
-        .map(|(path, diagnostics)| FileDiagnostics { path, diagnostics })
-        .collect();
-
-    RunFileTestResult {
-        data,
-        messages: vec![],
-    }
-}
-
-/// remove this function because duplicate implementation
-pub fn resolve_path(base_dir: &Path, relative_path: &str) -> PathBuf {
-    let absolute = if Path::new(relative_path).is_absolute() {
-        PathBuf::from(relative_path)
-    } else {
-        base_dir.join(relative_path)
-    };
-
-    let mut components = Vec::new();
-    for component in absolute.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                components.pop();
-            }
-            std::path::Component::Normal(_) | std::path::Component::RootDir => {
-                components.push(component);
-            }
-            _ => {}
-        }
-    }
-
-    PathBuf::from_iter(components)
-}
-
-pub fn write_result_log(file_name: &str, output: &Output) -> io::Result<()> {
-    let stdout = String::from_utf8(output.stdout.clone()).unwrap();
-    let stderr = String::from_utf8(output.stderr.clone()).unwrap();
-    let content = format!("stdout:\n{}\nstderr:\n{}", stdout, stderr);
-    let log_path = LOG_LOCATION.join(file_name);
-    std::fs::write(&log_path, content)?;
-    Ok(())
 }
