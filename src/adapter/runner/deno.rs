@@ -1,5 +1,6 @@
-use crate::runner::util::resolve_path;
-use crate::runner::util::send_stdout;
+use crate::adapter::runner::util::resolve_path;
+use crate::adapter::runner::util::send_stdout;
+use crate::error::LSError;
 use lsp_types::Diagnostic;
 use lsp_types::DiagnosticSeverity;
 use lsp_types::Position;
@@ -9,16 +10,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Output;
 use std::str::FromStr;
-use testing_language_server::error::LSError;
 
-use testing_language_server::spec::DetectWorkspaceResult;
-use testing_language_server::spec::DiscoverResult;
-use testing_language_server::spec::FileDiagnostics;
-use testing_language_server::spec::FoundFileTests;
-use testing_language_server::spec::RunFileTestResult;
-use testing_language_server::spec::TestItem;
+use crate::spec::DetectWorkspaceResult;
+use crate::spec::DiscoverResult;
+use crate::spec::FileDiagnostics;
+use crate::spec::FoundFileTests;
+use crate::spec::RunFileTestResult;
+use crate::spec::TestItem;
 
-use crate::model::Runner;
+use crate::adapter::model::Runner;
 
 use super::util::clean_ansi;
 use super::util::detect_workspaces_from_file_list;
@@ -162,7 +162,7 @@ pub struct DenoRunner;
 
 impl Runner for DenoRunner {
     #[tracing::instrument(skip(self))]
-    fn discover(&self, args: testing_language_server::spec::DiscoverArgs) -> Result<(), LSError> {
+    fn discover(&self, args: crate::spec::DiscoverArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let mut discover_results: DiscoverResult = DiscoverResult { data: vec![] };
         for file_path in file_paths {
@@ -176,10 +176,7 @@ impl Runner for DenoRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn run_file_test(
-        &self,
-        args: testing_language_server::spec::RunFileTestArgs,
-    ) -> Result<(), LSError> {
+    fn run_file_test(&self, args: crate::spec::RunFileTestArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let workspace = args.workspace;
         let output = std::process::Command::new("deno")
@@ -191,7 +188,7 @@ impl Runner for DenoRunner {
         write_result_log("deno.log", &output)?;
         let Output { stdout, stderr, .. } = output;
         if stdout.is_empty() {
-            return Err(LSError::Adapter(String::from_utf8(stderr).unwrap()));
+            return Err(LSError::AdapterError);
         }
         let test_result = String::from_utf8(stdout)?;
         let diagnostics: RunFileTestResult = parse_diagnostics(
@@ -204,10 +201,7 @@ impl Runner for DenoRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn detect_workspaces(
-        &self,
-        args: testing_language_server::spec::DetectWorkspaceArgs,
-    ) -> Result<(), LSError> {
+    fn detect_workspaces(&self, args: crate::spec::DetectWorkspaceArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let detect_result = detect_workspaces(file_paths);
         send_stdout(&detect_result)?;

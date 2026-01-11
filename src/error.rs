@@ -1,24 +1,51 @@
 use std::io;
-
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum LSError {
-    #[error("IO error")]
+    // Standard errors with From implementations
+    #[error("IO error: {0}")]
     IO(#[from] io::Error),
 
-    #[error("Serialization error")]
-    Serialization(#[from] serde_json::Error),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 
-    #[error("Adapter error")]
-    Adapter(String),
+    #[error("UTF8 error: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
 
-    #[error("UTF8 error")]
-    UTF8(#[from] std::str::Utf8Error),
+    #[error("String UTF8 error: {0}")]
+    StringUtf8(#[from] std::string::FromUtf8Error),
 
-    #[error("From UTF8 error")]
-    FromUTF8(#[from] std::string::FromUtf8Error),
+    #[error("TOML parse error: {0}")]
+    Toml(#[from] toml::de::Error),
 
-    #[error("Unknown error")]
-    Any(#[from] anyhow::Error),
+    // Adapter errors
+    #[error("Unknown test kind: {0}")]
+    UnknownTestKind(String),
+
+    #[error("Missing --test-kind argument")]
+    MissingTestKind,
+
+    #[error("Command spawn failed: {0}")]
+    CommandSpawn(String),
+
+    #[error("Adapter produced no output")]
+    AdapterNoOutput,
+
+    #[error("Adapter returned error output")]
+    AdapterError,
+
+    // Configuration errors
+    #[error("No workspace folders found")]
+    NoWorkspaceFolders,
+
+    #[error("No home directory found")]
+    NoHomeDirectory,
+
+    #[error("Configuration file not found: {0}")]
+    ConfigNotFound(PathBuf),
+
+    #[error("XML parse error")]
+    XmlParse,
 }

@@ -78,6 +78,46 @@ pub struct AdapterConfiguration {
     pub workspace_dir: Option<String>,
 }
 
+impl AdapterConfiguration {
+    /// Validate configuration and return warnings
+    pub fn validate(&self, adapter_id: &str) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Check if path looks valid
+        if self.path.is_empty() {
+            warnings.push(format!("Adapter '{}': path is empty", adapter_id));
+        } else {
+            // Check if it's an absolute path that exists
+            let path = std::path::Path::new(&self.path);
+            if path.is_absolute() && !path.exists() {
+                warnings.push(format!(
+                    "Adapter '{}': path '{}' does not exist",
+                    adapter_id, self.path
+                ));
+            }
+            // For relative paths, try to find in PATH
+            if !path.is_absolute() {
+                if let Err(_) = which::which(&self.path) {
+                    warnings.push(format!(
+                        "Adapter '{}': '{}' not found in PATH",
+                        adapter_id, self.path
+                    ));
+                }
+            }
+        }
+
+        // Check include patterns
+        if self.include.is_empty() {
+            warnings.push(format!(
+                "Adapter '{}': no include patterns specified",
+                adapter_id
+            ));
+        }
+
+        warnings
+    }
+}
+
 /// Result of `<adapter command> detect-workspace`
 #[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct DetectWorkspaceResult {

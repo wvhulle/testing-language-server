@@ -1,16 +1,16 @@
-use crate::runner::util::send_stdout;
+use crate::adapter::runner::util::send_stdout;
+use crate::error::LSError;
+use crate::spec::DetectWorkspaceResult;
+use crate::spec::RunFileTestResult;
 use std::path::PathBuf;
 use std::process::Output;
 use std::str::FromStr;
-use testing_language_server::error::LSError;
-use testing_language_server::spec::DetectWorkspaceResult;
-use testing_language_server::spec::RunFileTestResult;
 
-use testing_language_server::spec::DiscoverResult;
-use testing_language_server::spec::FoundFileTests;
-use testing_language_server::spec::TestItem;
+use crate::spec::DiscoverResult;
+use crate::spec::FoundFileTests;
+use crate::spec::TestItem;
 
-use crate::model::Runner;
+use crate::adapter::model::Runner;
 
 use super::util::detect_workspaces_from_file_list;
 use super::util::discover_rust_tests;
@@ -22,11 +22,11 @@ fn detect_workspaces(file_paths: &[String]) -> DetectWorkspaceResult {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-pub struct CargoTestRunner;
+pub struct CargoNextestRunner;
 
-impl Runner for CargoTestRunner {
+impl Runner for CargoNextestRunner {
     #[tracing::instrument(skip(self))]
-    fn discover(&self, args: testing_language_server::spec::DiscoverArgs) -> Result<(), LSError> {
+    fn discover(&self, args: crate::spec::DiscoverArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let mut discover_results: DiscoverResult = DiscoverResult { data: vec![] };
 
@@ -42,10 +42,7 @@ impl Runner for CargoTestRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn run_file_test(
-        &self,
-        args: testing_language_server::spec::RunFileTestArgs,
-    ) -> Result<(), LSError> {
+    fn run_file_test(&self, args: crate::spec::RunFileTestArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let discovered_tests: Vec<TestItem> = file_paths
             .iter()
@@ -60,22 +57,27 @@ impl Runner for CargoTestRunner {
         let workspace_root = args.workspace;
         let test_result = std::process::Command::new("cargo")
             .current_dir(&workspace_root)
-            .arg("test")
+            .arg("nextest")
+            .arg("run")
+            .arg("--workspace")
+            .arg("--no-fail-fast")
             .args(args.extra)
             .arg("--")
             .args(&test_ids)
             .output()
             .unwrap();
         let output = test_result;
-        write_result_log("cargo_test.log", &output)?;
-        let Output { stdout, stderr, .. } = output;
-        if stdout.is_empty() {
-            return Err(LSError::Adapter(String::from_utf8(stderr).unwrap()));
+        write_result_log("cargo_nextest.log", &output)?;
+        let Output {
+            stdout,
+            stderr,
+            status,
+        } = output;
+        let unexpected_status_code = status.code().map(|code| code != 100);
+        if stdout.is_empty() && !stderr.is_empty() && unexpected_status_code.unwrap_or(false) {
+            return Err(LSError::AdapterError);
         }
-        // When `--nocapture` option is set, stderr has some important information
-        // to parse test result
-        let test_result = String::from_utf8(stderr)? + &String::from_utf8(stdout)?;
-
+        let test_result = String::from_utf8(stderr)?;
         let diagnostics: RunFileTestResult = parse_cargo_diagnostics(
             &test_result,
             PathBuf::from_str(&workspace_root).unwrap(),
@@ -87,10 +89,7 @@ impl Runner for CargoTestRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn detect_workspaces(
-        &self,
-        args: testing_language_server::spec::DetectWorkspaceArgs,
-    ) -> Result<(), LSError> {
+    fn detect_workspaces(&self, args: crate::spec::DetectWorkspaceArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let detect_result = detect_workspaces(&file_paths);
         send_stdout(&detect_result)?;
@@ -100,10 +99,10 @@ impl Runner for CargoTestRunner {
 
 #[cfg(test)]
 mod tests {
+    use crate::spec::{FileDiagnostics, TestItem};
     use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
-    use testing_language_server::spec::FileDiagnostics;
 
-    use crate::runner::util::MAX_CHAR_LENGTH;
+    use crate::adapter::runner::util::MAX_CHAR_LENGTH;
 
     use super::*;
 
@@ -186,7 +185,7 @@ note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
                         ..Diagnostic::default()
                     }]
                 }],
-                messages: vec![]
+                messages: vec!()
             }
         )
     }

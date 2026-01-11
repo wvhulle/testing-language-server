@@ -1,16 +1,16 @@
 use std::process::Output;
 
-use regex::Regex;
-use testing_language_server::{
+use crate::{
     error::LSError,
     spec::{
         DetectWorkspaceResult, DiscoverResult, FileDiagnostics, FoundFileTests, RunFileTestResult,
         TestItem,
     },
 };
+use regex::Regex;
 use xml::{reader::XmlEvent, ParserConfig};
 
-use crate::model::Runner;
+use crate::adapter::model::Runner;
 
 use super::util::{
     detect_workspaces_from_file_list, discover_with_treesitter, send_stdout, write_result_log,
@@ -86,82 +86,64 @@ fn discover(file_path: &str) -> Result<Vec<TestItem>, LSError> {
     discover_with_treesitter(file_path, &tree_sitter_javascript::language(), query)
 }
 
-// characters can be like
-// \n[Error [ERR_TEST_FAILURE]: assert is not defined] {\n  failureType: 'testCodeFailure',\n  cause: ReferenceError [Error]: assert is not defined\n      at TestContext.<anonymous> (/home/test-user/projects/testing-language-server/demo/node-test/index.test.js:6:3)\n  at Test.runInAsyncScope (node:async_hooks:203:9)\n      at Test.run (node:internal/test_runner/test:631:25)\n      at Test.start (node:internal/test_runner/test:542:17)\n      at startSubtest (node:internal/test_runner/harness:214:17),\n  code: 'ERR_TEST_FAILURE'\n}\n\t\t
-fn get_result_from_characters(
-    error_text: &str,
-    target_file_paths: &[String],
-) -> Result<ResultFromXml, anyhow::Error> {
-    let re_path_line = Regex::new(r"\(([^:]+):(\d+):(\d+)\)").unwrap();
+fn parse_error_location(error_text: &str, target_file_paths: &[String]) -> Option<ResultFromXml> {
+    let re = Regex::new(r"\(([^:]+):(\d+):(\d+)\)").ok()?;
     for line in error_text.lines() {
-        if let Some(caps) = re_path_line.captures(line) {
-            let file_path = &caps[1];
+        if let Some(caps) = re.captures(line) {
+            let file_path = caps.get(1)?.as_str();
             if !target_file_paths.contains(&file_path.to_string()) {
                 continue;
             }
-            return Ok(ResultFromXml {
-                // remove prefix because it's like "\n"
-                message: error_text.strip_prefix("\n").unwrap().to_string(),
+            return Some(ResultFromXml {
+                message: error_text
+                    .strip_prefix('\n')
+                    .unwrap_or(error_text)
+                    .to_string(),
                 path: file_path.to_string(),
-                line: caps[2].parse::<u32>().unwrap(),
-                col: caps[3].parse::<u32>().unwrap(),
+                line: caps.get(2)?.as_str().parse().ok()?,
+                col: caps.get(3)?.as_str().parse().ok()?,
             });
         }
     }
-
-    Err(anyhow::anyhow!("Failed to parse error from {}", error_text))
+    None
 }
 
-fn get_result_from_xml(
-    output: &str,
-    target_file_paths: &[String],
-) -> Result<Vec<ResultFromXml>, anyhow::Error> {
-    use xml::common::Position;
-
+fn parse_xml_output(output: &str, target_file_paths: &[String]) -> Vec<ResultFromXml> {
     let mut reader = ParserConfig::default()
         .ignore_root_level_whitespace(false)
         .create_reader(output.as_bytes());
 
-    let local_name = "failure";
-
     let mut in_failure = false;
-    let mut result: Vec<ResultFromXml> = Vec::new();
+    let mut results = Vec::new();
+
     loop {
         match reader.next() {
-            Ok(e) => match e {
-                XmlEvent::StartElement { name, .. } => {
-                    if name.local_name.starts_with(local_name) {
-                        in_failure = true;
-                    }
+            Ok(XmlEvent::StartElement { name, .. }) if name.local_name.starts_with("failure") => {
+                in_failure = true;
+            }
+            Ok(XmlEvent::EndElement { .. }) => {
+                in_failure = false;
+            }
+            Ok(XmlEvent::Characters(data)) if in_failure => {
+                if let Some(result) = parse_error_location(&data, target_file_paths) {
+                    results.push(result);
                 }
-                XmlEvent::EndElement { .. } => {
-                    in_failure = false;
-                }
-                XmlEvent::Characters(data) => {
-                    if let Ok(result_from_xml) =
-                        get_result_from_characters(&data, target_file_paths)
-                    {
-                        if in_failure {
-                            result.push(result_from_xml);
-                        }
-                    }
-                }
-                XmlEvent::EndDocument => break,
-                _ => {}
-            },
+            }
+            Ok(XmlEvent::EndDocument) => break,
             Err(e) => {
-                tracing::error!("Error at {}: {e}", reader.position());
+                tracing::error!("XML parse error: {e}");
                 break;
             }
+            _ => {}
         }
     }
 
-    Ok(result)
+    results
 }
 
 impl Runner for NodeTestRunner {
     #[tracing::instrument(skip(self))]
-    fn discover(&self, args: testing_language_server::spec::DiscoverArgs) -> Result<(), LSError> {
+    fn discover(&self, args: crate::spec::DiscoverArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let mut discover_results: DiscoverResult = DiscoverResult { data: vec![] };
         for file_path in file_paths {
@@ -175,10 +157,7 @@ impl Runner for NodeTestRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn run_file_test(
-        &self,
-        args: testing_language_server::spec::RunFileTestArgs,
-    ) -> Result<(), LSError> {
+    fn run_file_test(&self, args: crate::spec::RunFileTestArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let workspace_root = args.workspace;
         let output = std::process::Command::new("node")
@@ -191,17 +170,11 @@ impl Runner for NodeTestRunner {
         write_result_log("node-test.xml", &output)?;
         let Output { stdout, stderr, .. } = output;
         if stdout.is_empty() && !stderr.is_empty() {
-            return Err(LSError::Adapter(String::from_utf8(stderr).unwrap()));
+            return Err(LSError::AdapterError);
         }
-        let stdout = String::from_utf8(stdout).unwrap();
-        let result_from_xml = get_result_from_xml(&stdout, &file_paths)?;
-        let result_item: Vec<FileDiagnostics> = result_from_xml
-            .into_iter()
-            .map(|result_from_xml| {
-                let result_item: FileDiagnostics = result_from_xml.into();
-                result_item
-            })
-            .collect();
+        let stdout = String::from_utf8(stdout)?;
+        let results = parse_xml_output(&stdout, &file_paths);
+        let result_item: Vec<FileDiagnostics> = results.into_iter().map(|r| r.into()).collect();
         let result = RunFileTestResult {
             data: result_item,
             messages: vec![],
@@ -211,10 +184,7 @@ impl Runner for NodeTestRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn detect_workspaces(
-        &self,
-        args: testing_language_server::spec::DetectWorkspaceArgs,
-    ) -> Result<(), LSError> {
+    fn detect_workspaces(&self, args: crate::spec::DetectWorkspaceArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let detect_result: DetectWorkspaceResult =
             detect_workspaces_from_file_list(&file_paths, &["package.json".to_string()]);
@@ -236,7 +206,7 @@ mod tests {
         let content = std::fs::read_to_string(&xml_path).unwrap();
         let target_file_path =
             "/home/test-user/projects/testing-language-server/demo/node-test/index.test.js";
-        let result = get_result_from_xml(&content, &[target_file_path.to_string()]).unwrap();
+        let result = parse_xml_output(&content, &[target_file_path.to_string()]);
         assert_eq!(result.len(), 9);
 
         let paths = result

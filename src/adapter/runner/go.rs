@@ -1,6 +1,11 @@
-use crate::model::Runner;
-use crate::runner::util::send_stdout;
-use anyhow::anyhow;
+use crate::adapter::model::Runner;
+use crate::adapter::runner::util::send_stdout;
+use crate::error::LSError;
+use crate::spec::DiscoverResult;
+use crate::spec::FileDiagnostics;
+use crate::spec::FoundFileTests;
+use crate::spec::RunFileTestResult;
+use crate::spec::TestItem;
 use lsp_types::Diagnostic;
 use lsp_types::DiagnosticSeverity;
 use lsp_types::Position;
@@ -11,12 +16,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Output;
 use std::str::FromStr;
-use testing_language_server::error::LSError;
-use testing_language_server::spec::DiscoverResult;
-use testing_language_server::spec::FileDiagnostics;
-use testing_language_server::spec::FoundFileTests;
-use testing_language_server::spec::RunFileTestResult;
-use testing_language_server::spec::TestItem;
 
 use super::util::detect_workspaces_from_file_list;
 use super::util::discover_with_treesitter;
@@ -74,7 +73,7 @@ fn parse_diagnostics(
     let mut message = String::new();
     let mut last_action: Option<Action> = None;
     for line in lines {
-        let value: TestResultLine = serde_json::from_str(line).map_err(|e| anyhow!("{:?}", e))?;
+        let value: TestResultLine = serde_json::from_str(line)?;
         match value.action {
             Action::Run => {
                 file_name = None;
@@ -230,10 +229,7 @@ fn discover(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 pub struct GoTestRunner;
 impl Runner for GoTestRunner {
     #[tracing::instrument(skip(self))]
-    fn discover(
-        &self,
-        args: testing_language_server::spec::DiscoverArgs,
-    ) -> Result<(), testing_language_server::error::LSError> {
+    fn discover(&self, args: crate::spec::DiscoverArgs) -> Result<(), crate::error::LSError> {
         let file_paths = args.file_paths;
         let mut discover_results: DiscoverResult = DiscoverResult { data: vec![] };
 
@@ -251,8 +247,8 @@ impl Runner for GoTestRunner {
     #[tracing::instrument(skip(self))]
     fn run_file_test(
         &self,
-        args: testing_language_server::spec::RunFileTestArgs,
-    ) -> Result<(), testing_language_server::error::LSError> {
+        args: crate::spec::RunFileTestArgs,
+    ) -> Result<(), crate::error::LSError> {
         let file_paths = args.file_paths;
         let default_args = ["-v", "-json", "", "-count=1", "-timeout=60s"];
         let workspace = args.workspace;
@@ -261,12 +257,11 @@ impl Runner for GoTestRunner {
             .arg("test")
             .args(default_args)
             .args(args.extra)
-            .output()
-            .unwrap();
+            .output()?;
         write_result_log("go.log", &output)?;
         let Output { stdout, stderr, .. } = output;
         if stdout.is_empty() && !stderr.is_empty() {
-            return Err(LSError::Adapter(String::from_utf8(stderr).unwrap()));
+            return Err(LSError::AdapterError);
         }
         let test_result = String::from_utf8(stdout)?;
         let diagnostics: RunFileTestResult = parse_diagnostics(
@@ -281,8 +276,8 @@ impl Runner for GoTestRunner {
     #[tracing::instrument(skip(self))]
     fn detect_workspaces(
         &self,
-        args: testing_language_server::spec::DetectWorkspaceArgs,
-    ) -> Result<(), testing_language_server::error::LSError> {
+        args: crate::spec::DetectWorkspaceArgs,
+    ) -> Result<(), crate::error::LSError> {
         send_stdout(&detect_workspaces_from_file_list(
             &args.file_paths,
             &["go.mod".to_string()],
@@ -293,11 +288,11 @@ impl Runner for GoTestRunner {
 
 #[cfg(test)]
 mod tests {
-    use crate::runner::go::discover;
+    use crate::adapter::runner::go::discover;
     use std::str::FromStr;
     use std::{fs::read_to_string, path::PathBuf};
 
-    use crate::runner::go::parse_diagnostics;
+    use crate::adapter::runner::go::parse_diagnostics;
 
     #[test]
     fn test_parse_diagnostics() {

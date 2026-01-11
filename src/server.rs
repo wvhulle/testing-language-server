@@ -55,16 +55,15 @@ impl TestingLS {
     }
 
     fn project_dir(&self) -> Result<PathBuf, LSError> {
-        let cwd = current_dir();
-        if let Ok(cwd) = cwd {
+        if let Ok(cwd) = current_dir() {
             Ok(cwd)
         } else {
-            let default_project_dir = self
+            let folders = self
                 .workspace_folders
                 .as_ref()
-                .ok_or(LSError::Any(anyhow::anyhow!("No workspace folders found")))?;
-            let default_workspace_uri = &default_project_dir[0].uri;
-            Ok(default_workspace_uri.to_file_path().unwrap())
+                .ok_or(LSError::NoWorkspaceFolders)?;
+            let uri = &folders[0].uri;
+            Ok(uri.to_file_path().unwrap())
         }
     }
 
@@ -139,18 +138,13 @@ impl TestingLS {
     ) -> Result<InitializedOptions, LSError> {
         let project_dir = self.project_dir()?;
         let toml_path = project_dir.join(TOML_FILE_NAME);
-        let toml_content = std::fs::read_to_string(toml_path);
-        match toml_content {
-            Ok(toml_content) => Ok(toml::from_str::<InitializedOptions>(&toml_content).unwrap()),
-            Err(_) => {
-                if let Some(options) = options {
-                    Ok(serde_json::from_value(options.clone())?)
-                } else {
-                    Err(LSError::Any(anyhow::anyhow!(
-                        "Invalid initialization options"
-                    )))
-                }
-            }
+
+        match std::fs::read_to_string(&toml_path) {
+            Ok(content) => Ok(toml::from_str::<InitializedOptions>(&content)?),
+            Err(_) => match options {
+                Some(opts) => Ok(serde_json::from_value(opts.clone())?),
+                None => Err(LSError::ConfigNotFound(toml_path)),
+            },
         }
     }
 
@@ -158,8 +152,27 @@ impl TestingLS {
         let adapter_commands = self.adapter_commands();
         let project_dir = self.project_dir()?;
         self.workspaces_cache = vec![];
+
+        // Validate adapter configurations and warn about issues
+        for (adapter_id, adapter) in &adapter_commands {
+            let warnings = adapter.validate(adapter_id);
+            for warning in warnings {
+                tracing::warn!("{}", warning);
+                let params: ShowMessageParams = ShowMessageParams {
+                    typ: MessageType::WARNING,
+                    message: warning,
+                };
+                let _ = send_stdout(&json!({
+                    "jsonrpc": "2.0",
+                    "method": "window/showMessage",
+                    "params": params,
+                }));
+            }
+        }
+
         // Nested and multiple loops, but each count is small
-        for adapter in adapter_commands.into_values() {
+        for (adapter_id, adapter) in adapter_commands.into_iter() {
+            tracing::debug!("Processing adapter: {}", adapter_id);
             let AdapterConfiguration {
                 path,
                 extra_arg,
@@ -185,19 +198,9 @@ impl TestingLS {
                 .arg("--")
                 .args(extra_arg)
                 .envs(env)
-                .output()
-                .map_err(|err| LSError::Adapter(err.to_string()))?;
-            let adapter_result = String::from_utf8(output.stdout)
-                .map_err(|err| LSError::Adapter(err.to_string()))?;
-            let workspace: DetectWorkspaceResult = match serde_json::from_str(&adapter_result) {
-                Ok(result) => result,
-                Err(err) => {
-                    let stderr = String::from_utf8(output.stderr);
-                    tracing::error!("Failed to parse adapter result: {:?}", err);
-                    tracing::error!("Error: {:?}", stderr);
-                    return Err(LSError::Adapter(err.to_string()));
-                }
-            };
+                .output()?;
+            let adapter_result = String::from_utf8(output.stdout)?;
+            let workspace: DetectWorkspaceResult = serde_json::from_str(&adapter_result)?;
             let workspace = if let Some(workspace_dir) = workspace_dir {
                 let workspace_dir = resolve_path(&project_dir, workspace_dir)
                     .to_str()
@@ -319,26 +322,18 @@ impl TestingLS {
             .arg("--")
             .args(&adapter.extra_arg)
             .envs(&adapter.env)
-            .output()
-            .map_err(|err| LSError::Adapter(err.to_string()))?;
-        let Output { stdout, stderr, .. } = output;
-        if !stderr.is_empty() {
-            let message = "Error occurred when running test via adapter.\nCheck adapter log or run tests manually".to_string();
-            let message_type = MessageType::ERROR;
-            let params: ShowMessageParams = ShowMessageParams {
-                typ: message_type,
-                message,
-            };
-            send_stdout(&json!({
-                "jsonrpc": "2.0",
-                "method": "window/showMessage",
-                "params": params,
-            }))
-            .unwrap();
-        }
+            .output()?;
+        let Output {
+            stdout,
+            stderr,
+            status,
+        } = output;
+        let adapter_result = String::from_utf8(stdout)?;
+        let stderr_str =
+            String::from_utf8(stderr).unwrap_or_else(|_| "<non-utf8 stderr>".to_string());
 
-        let adapter_result =
-            String::from_utf8(stdout).map_err(|err| LSError::Adapter(err.to_string()))?;
+        // Only show error if adapter failed (non-zero exit) AND produced no valid output
+        // Many test frameworks write progress/warnings to stderr even on success
         match serde_json::from_str::<RunFileTestResult>(&adapter_result) {
             Ok(res) => {
                 for target_file in paths {
@@ -354,7 +349,33 @@ impl TestingLS {
                 }
             }
             Err(err) => {
-                tracing::error!("Failed to parse adapter result: {:?}", err);
+                // JSON parse failed - this is a real error
+                let message = if !status.success() {
+                    format!(
+                        "Adapter failed with exit code {}.\nstderr: {}",
+                        status.code().unwrap_or(-1),
+                        stderr_str.lines().take(5).collect::<Vec<_>>().join("\n")
+                    )
+                } else if adapter_result.trim().is_empty() {
+                    "Adapter produced no output. Check adapter configuration.".to_string()
+                } else {
+                    format!(
+                        "Failed to parse adapter output: {}\nOutput: {}",
+                        err,
+                        adapter_result.chars().take(200).collect::<String>()
+                    )
+                };
+                tracing::error!("{}", message);
+                let params: ShowMessageParams = ShowMessageParams {
+                    typ: MessageType::ERROR,
+                    message,
+                };
+                send_stdout(&json!({
+                    "jsonrpc": "2.0",
+                    "method": "window/showMessage",
+                    "params": params,
+                }))
+                .unwrap();
             }
         }
         Ok(diagnostics)
@@ -454,11 +475,8 @@ impl TestingLS {
             .arg("--")
             .args(&adapter.extra_arg)
             .envs(&adapter.env)
-            .output()
-            .map_err(|err| LSError::Adapter(err.to_string()))?;
-
-        let adapter_result =
-            String::from_utf8(output.stdout).map_err(|err| LSError::Adapter(err.to_string()))?;
+            .output()?;
+        let adapter_result = String::from_utf8(output.stdout)?;
         Ok(serde_json::from_str(&adapter_result)?)
     }
 

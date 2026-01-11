@@ -105,9 +105,34 @@ You can see the example in [See more example](./.vim/coc-settings.json)
 See [testing-ls.nvim](https://github.com/kbwo/testing-ls.nvim)
 
 ### Helix
-See [language.toml](./demo/.helix/language.toml).
 
-The array wrapper has been removed to simplify the configuration structure. Please update your settings accordingly.
+Add to your `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.testing-ls]
+command = "testing-language-server"
+
+# Optional: pass config via initializationOptions instead of .testingls.toml
+[language-server.testing-ls.config]
+enableWorkspaceDiagnostics = true
+
+[language-server.testing-ls.config.adapterCommand.cargo-test]
+path = "testing-ls-adapter"
+extra_arg = ["--test-kind=cargo-test"]
+include = ["/**/*.rs"]
+exclude = ["/**/target/**"]
+
+[[language]]
+name = "rust"
+language-servers = [
+  { name = "testing-ls", only-features = ["diagnostics"] },
+  "rust-analyzer"
+]
+```
+
+**Note:** Use `only-features = ["diagnostics"]` to prevent testing-ls from interfering with other LSP features provided by rust-analyzer.
+
+See [demo/.helix/languages.toml](./demo/.helix/languages.toml) for more examples.
 
 ## Adapter
 - [x] `cargo test`
@@ -123,3 +148,82 @@ The array wrapper has been removed to simplify the configuration structure. Plea
 ⚠ The specification of adapter CLI is not stabilized yet.
 
 See [ADAPTER_SPEC.md](./doc/ADAPTER_SPEC.md) and [spec.rs](./src/spec.rs).
+
+## Configuration Reference
+
+### `InitializedOptions`
+
+Configuration can be provided via `.testingls.toml` in the project root, or via LSP `initializationOptions`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enableWorkspaceDiagnostics` | `boolean` | Enable diagnostics for all files in workspace |
+| `adapterCommand` | `object` | Map of adapter configurations (see below) |
+
+### `AdapterConfiguration`
+
+Each adapter is configured under `adapterCommand.<name>`:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | `string` | Yes | Path to adapter binary (absolute or in PATH) |
+| `extra_arg` | `string[]` | No | Extra arguments passed after `--` to adapter |
+| `env` | `object` | No | Environment variables for adapter process |
+| `include` | `string[]` | Yes | Glob patterns for files to include |
+| `exclude` | `string[]` | Yes | Glob patterns for files to exclude |
+| `workspace_dir` | `string` | No | Override workspace directory |
+
+## Troubleshooting
+
+### "Adapter failed with exit code X"
+
+This error occurs when the adapter process exits with a non-zero status.
+
+**Common causes:**
+- Test framework not installed (e.g., `cargo`, `npm`, `go` not in PATH)
+- Invalid `path` in adapter configuration
+- Missing dependencies in the project
+
+**Solutions:**
+1. Verify the adapter binary exists: `which testing-ls-adapter`
+2. Run the adapter manually to see detailed errors:
+   ```sh
+   testing-ls-adapter discover --file-paths src/main.rs -- --test-kind=cargo-test
+   ```
+3. Check if the test framework works: `cargo test` / `npm test` / etc.
+
+### "Adapter produced no output"
+
+The adapter ran but didn't return any JSON output.
+
+**Common causes:**
+- Wrong `include` patterns - no files matched
+- Adapter crashed before producing output
+- Wrong `--test-kind` argument
+
+**Solutions:**
+1. Verify include patterns match your files
+2. Check adapter logs (if enabled)
+3. Run adapter manually with `--file-paths` pointing to a test file
+
+### "Failed to parse adapter output"
+
+The adapter produced output but it wasn't valid JSON.
+
+**Common causes:**
+- Adapter version mismatch
+- Adapter writing debug output to stdout
+
+**Solutions:**
+1. Update both `testing-language-server` and `testing-ls-adapter` to the same version
+2. Check for print statements or debug output in custom adapters
+
+### Debugging
+
+Enable debug logging by setting the `RUST_LOG` environment variable:
+
+```sh
+RUST_LOG=debug hx .
+```
+
+Adapter logs are written to the working directory as `<adapter>_test.log` (e.g., `cargo_test.log`).

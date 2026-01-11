@@ -5,11 +5,11 @@ use std::process::Output;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use crate::spec::{DetectWorkspaceResult, FileDiagnostics, TestItem};
+use crate::{error::LSError, spec::RunFileTestResult};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use regex::Regex;
 use serde::Serialize;
-use testing_language_server::spec::{DetectWorkspaceResult, FileDiagnostics, TestItem};
-use testing_language_server::{error::LSError, spec::RunFileTestResult};
 use tree_sitter::{Language, Point, Query, QueryCursor};
 
 pub struct DiscoverWithTSOption {}

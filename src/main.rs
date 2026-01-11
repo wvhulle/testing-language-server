@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use util::{format_uri, send_stdout};
 
-use crate::log::Log;
+use crate::log::init_logging;
 use crate::server::TestingLS;
 use crate::util::send_error;
 
@@ -151,7 +151,7 @@ fn main_loop(server: &mut TestingLS) -> Result<(), LSError> {
 
 fn main() {
     let mut server = TestingLS::new();
-    let _guard = Log::init().expect("Failed to initialize logger");
+    let _guard = init_logging("server").expect("Failed to initialize logger");
     if let Err(ls_error) = main_loop(&mut server) {
         tracing::error!("Error: {:?}", ls_error);
     }

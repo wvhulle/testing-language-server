@@ -3,14 +3,14 @@ use std::{
     fs::{self},
 };
 
-use lsp_types::{Diagnostic, DiagnosticSeverity};
-use serde_json::Value;
-use testing_language_server::{
+use crate::{
     error::LSError,
     spec::{DiscoverResult, FileDiagnostics, FoundFileTests, RunFileTestResult, TestItem},
 };
+use lsp_types::{Diagnostic, DiagnosticSeverity};
+use serde_json::Value;
 
-use crate::model::Runner;
+use crate::adapter::model::Runner;
 
 use super::util::{
     clean_ansi, detect_workspaces_from_file_list, discover_with_treesitter, send_stdout,
@@ -133,7 +133,7 @@ fn parse_diagnostics(
 
 impl Runner for VitestRunner {
     #[tracing::instrument(skip(self))]
-    fn discover(&self, args: testing_language_server::spec::DiscoverArgs) -> Result<(), LSError> {
+    fn discover(&self, args: crate::spec::DiscoverArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let mut discover_results: DiscoverResult = DiscoverResult { data: vec![] };
 
@@ -149,10 +149,7 @@ impl Runner for VitestRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn run_file_test(
-        &self,
-        args: testing_language_server::spec::RunFileTestArgs,
-    ) -> Result<(), LSError> {
+    fn run_file_test(&self, args: crate::spec::RunFileTestArgs) -> Result<(), LSError> {
         let file_paths = args.file_paths;
         let workspace_root = args.workspace;
         let log_path = LOG_LOCATION.join("vitest.json");
@@ -174,10 +171,7 @@ impl Runner for VitestRunner {
     }
 
     #[tracing::instrument(skip(self))]
-    fn detect_workspaces(
-        &self,
-        args: testing_language_server::spec::DetectWorkspaceArgs,
-    ) -> Result<(), LSError> {
+    fn detect_workspaces(&self, args: crate::spec::DetectWorkspaceArgs) -> Result<(), LSError> {
         send_stdout(&detect_workspaces_from_file_list(
             &args.file_paths,
             &[
