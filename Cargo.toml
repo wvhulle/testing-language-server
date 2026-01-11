@@ -2,8 +2,11 @@
 authors = ["Willem Vanhulle <willemvanhulle@protonmail.com>"]
 description = "See failed tests as diagnostic messages next to your test code."
 edition = "2024"
+exclude = ["/demo/", "/.vim/", "/.github/"]
+keywords = ["language-server", "testing", "javascript", "php", "go"]
 license = "MIT"
 name = "assert-lsp"
+repository = "https://github.com/wvhulle/assert-lsp"
 version = "0.0.1"
 
 [lints.clippy]

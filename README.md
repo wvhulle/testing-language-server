@@ -2,7 +2,9 @@
 
 LSP server that shows test failures as diagnostics. Zero configuration for standard projects.
 
-Supported: `cargo test`, `cargo nextest`, Jest, Vitest, Node Test Runner, `go test`, `deno test`, PHPUnit.
+Supported and tested: `cargo test`
+
+Under construction (may or may not work): `cargo nextest`, Jest, Vitest, Node Test Runner, `go test`, `deno test`, PHPUnit.
 
 ## Installation
 
