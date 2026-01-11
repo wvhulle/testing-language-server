@@ -1,9 +1,11 @@
 //! LSP protocol communication utilities.
 
-use crate::error::LSError;
+use std::io::{Write, stdout};
+
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Number, Value};
-use std::io::{stdout, Write};
+use serde_json::{Number, Value, json};
+
+use crate::error::LSError;
 
 /// Send a JSON-RPC message to stdout with Content-Length header.
 pub fn send<T>(message: &T) -> Result<(), LSError>

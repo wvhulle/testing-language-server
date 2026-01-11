@@ -1,8 +1,9 @@
 //! Testing Language Server - LSP for running tests and showing diagnostics.
 
+use std::collections::HashMap;
+
 use lsp_types::{Diagnostic, Range, ShowMessageParams};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub mod config;
 pub mod error;
@@ -17,7 +18,8 @@ pub mod javascript;
 pub mod php;
 pub mod rust;
 
-/// If the character value is greater than the line length it defaults back to the line length.
+/// If the character value is greater than the line length it defaults back to
+/// the line length.
 pub const MAX_CHAR_LENGTH: u32 = 10000;
 
 // --- Core Types ---
@@ -75,7 +77,8 @@ pub struct Workspaces {
 /// Configuration for a test adapter.
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
 pub struct AdapterConfiguration {
-    /// Test runner kind (e.g., "cargo-test", "cargo-nextest", "jest", "vitest", "go-test", "phpunit", "node-test", "deno")
+    /// Test runner kind (e.g., "cargo-test", "cargo-nextest", "jest", "vitest",
+    /// "go-test", "phpunit", "node-test", "deno")
     pub test_kind: String,
     #[serde(default)]
     pub extra_arg: Vec<String>,

@@ -1,11 +1,15 @@
 //! Workspace detection utilities.
 
-use crate::Workspaces;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
-/// Determine if a particular file is the root of workspace based on marker files.
+use crate::Workspaces;
+
+/// Determine if a particular file is the root of workspace based on marker
+/// files.
 fn detect_workspace_from_file(file_path: PathBuf, marker_files: &[&str]) -> Option<String> {
     let parent = file_path.parent()?;
     if marker_files
@@ -58,7 +62,8 @@ pub fn detect_from_files(file_paths: &[String], marker_files: &[&str]) -> Worksp
     Workspaces { map: result_map }
 }
 
-/// Resolve a relative path against a base directory, handling ../ and ./ components.
+/// Resolve a relative path against a base directory, handling ../ and ./
+/// components.
 pub fn resolve_path(base_dir: &Path, relative_path: &str) -> PathBuf {
     let absolute = if Path::new(relative_path).is_absolute() {
         PathBuf::from(relative_path)

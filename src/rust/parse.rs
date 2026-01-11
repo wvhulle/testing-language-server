@@ -1,11 +1,13 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::{Diagnostics, FileDiagnostics, TestItem, MAX_CHAR_LENGTH};
+use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH, TestItem};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -26,13 +28,22 @@ struct TestEvent {
 }
 
 /// Extract panic location and message from test stdout.
-fn extract_panic_location(stdout: &str, workspace_root: &Path) -> (Option<String>, u32, u32, String) {
+fn extract_panic_location(
+    stdout: &str,
+    workspace_root: &Path,
+) -> (Option<String>, u32, u32, String) {
     let re = Regex::new(r"panicked at ([^:]+):(\d+):(\d+):").unwrap();
 
     if let Some(caps) = re.captures(stdout) {
         let relative_path = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        let line: u32 = caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(1);
-        let col: u32 = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(1);
+        let line: u32 = caps
+            .get(2)
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(1);
+        let col: u32 = caps
+            .get(3)
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(1);
 
         let absolute_path = workspace_root.join(relative_path);
         let file_path = absolute_path
@@ -67,8 +78,20 @@ pub fn parse_nextest_output(
         if let Some(m) = panic_re.captures(line) {
             let id_with_file = m.get(1).unwrap().as_str().to_string();
             let relative_file_path = m.get(2).unwrap().as_str().to_string();
-            let lnum = m.get(3).unwrap().as_str().parse::<u32>().unwrap_or(1).saturating_sub(1);
-            let col = m.get(4).unwrap().as_str().parse::<u32>().unwrap_or(1).saturating_sub(1);
+            let lnum = m
+                .get(3)
+                .unwrap()
+                .as_str()
+                .parse::<u32>()
+                .unwrap_or(1)
+                .saturating_sub(1);
+            let col = m
+                .get(4)
+                .unwrap()
+                .as_str()
+                .parse::<u32>()
+                .unwrap_or(1)
+                .saturating_sub(1);
 
             // Collect message from subsequent lines until empty line
             let mut message = String::new();
@@ -92,8 +115,14 @@ pub fn parse_nextest_output(
 
                 let diagnostic = Diagnostic {
                     range: Range {
-                        start: Position { line: lnum, character: col },
-                        end: Position { line: lnum, character: MAX_CHAR_LENGTH },
+                        start: Position {
+                            line: lnum,
+                            character: col,
+                        },
+                        end: Position {
+                            line: lnum,
+                            character: MAX_CHAR_LENGTH,
+                        },
                     },
                     message: message.clone(),
                     severity: Some(DiagnosticSeverity::ERROR),
@@ -113,7 +142,11 @@ pub fn parse_nextest_output(
                         range: test_item.start_position,
                         message: format!(
                             "`{}` failed at {}:{}:{}\n{}",
-                            test_item.name, relative_file_path, lnum + 1, col + 1, message
+                            test_item.name,
+                            relative_file_path,
+                            lnum + 1,
+                            col + 1,
+                            message
                         ),
                         severity: Some(DiagnosticSeverity::ERROR),
                         source: Some("cargo-nextest".to_string()),
@@ -137,7 +170,8 @@ pub fn parse_nextest_output(
     }
 }
 
-/// Parse libtest JSON format output from `cargo test -- -Z unstable-options --format json`
+/// Parse libtest JSON format output from `cargo test -- -Z unstable-options
+/// --format json`
 pub fn parse_libtest_json(
     json_output: &str,
     workspace_root: PathBuf,
@@ -257,8 +291,9 @@ pub fn parse_libtest_json(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
+
+    use super::*;
 
     #[test]
     fn test_parse_libtest_json() {
@@ -267,18 +302,31 @@ mod tests {
 {"type":"test","name":"rocks::dependency::tests::parse_dependency","event":"failed","stdout":"thread 'rocks::dependency::tests::parse_dependency' panicked at rocks-lib/src/rocks/dependency.rs:86:64:\ncalled `Result::unwrap()` on an `Err` value: unexpected end of input\n","message":"panicked"}
 {"type":"suite","event":"failed","passed":0,"failed":1,"ignored":0,"measured":0,"filtered_out":0}"#;
 
-        let file_paths = vec!["/home/example/projects/rocks-lib/src/rocks/dependency.rs".to_string()];
+        let file_paths =
+            vec!["/home/example/projects/rocks-lib/src/rocks/dependency.rs".to_string()];
         let test_items = vec![TestItem {
             id: "rocks::dependency::tests::parse_dependency".to_string(),
             name: "rocks::dependency::tests::parse_dependency".to_string(),
             path: "/home/example/projects/rocks-lib/src/rocks/dependency.rs".to_string(),
             start_position: Range {
-                start: Position { line: 85, character: 63 },
-                end: Position { line: 85, character: MAX_CHAR_LENGTH },
+                start: Position {
+                    line: 85,
+                    character: 63,
+                },
+                end: Position {
+                    line: 85,
+                    character: MAX_CHAR_LENGTH,
+                },
             },
             end_position: Range {
-                start: Position { line: 85, character: 63 },
-                end: Position { line: 85, character: MAX_CHAR_LENGTH },
+                start: Position {
+                    line: 85,
+                    character: 63,
+                },
+                end: Position {
+                    line: 85,
+                    character: MAX_CHAR_LENGTH,
+                },
             },
         }];
 
@@ -291,6 +339,9 @@ mod tests {
 
         assert_eq!(diagnostics.data.len(), 1);
         assert_eq!(diagnostics.data[0].diagnostics.len(), 1);
-        assert_eq!(diagnostics.data[0].diagnostics[0].source, Some("cargo-test".to_string()));
+        assert_eq!(
+            diagnostics.data[0].diagnostics[0].source,
+            Some("cargo-test".to_string())
+        );
     }
 }

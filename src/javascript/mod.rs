@@ -1,16 +1,15 @@
 pub mod call;
 pub mod parse;
 
-use std::collections::HashSet;
-use std::path::PathBuf;
-use std::str::FromStr;
-
-use crate::error::LSError;
-use crate::runner::Runner;
-use crate::{Diagnostics, DiscoveredTests, FileTests, FileDiagnostics, TestItem, Workspaces, MAX_CHAR_LENGTH};
+use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
 use lsp_types::{Position, Range};
 use tree_sitter::{Language, Point, Query, QueryCursor};
+
+use crate::{
+    Diagnostics, DiscoveredTests, FileDiagnostics, FileTests, MAX_CHAR_LENGTH, TestItem,
+    Workspaces, error::LSError, runner::Runner,
+};
 
 const DISCOVER_JEST_QUERY: &str = include_str!("discover_jest.scm");
 const DISCOVER_DENO_QUERY: &str = include_str!("discover_deno.scm");
@@ -326,7 +325,8 @@ mod tests {
     fn test_discover_jest() {
         let file_path = "demo/jest/index.spec.js";
         let language = tree_sitter_javascript::language();
-        let test_items = discover_with_treesitter(file_path, &language, DISCOVER_JEST_QUERY).unwrap();
+        let test_items =
+            discover_with_treesitter(file_path, &language, DISCOVER_JEST_QUERY).unwrap();
         assert!(!test_items.is_empty());
     }
 
@@ -334,7 +334,8 @@ mod tests {
     fn test_discover_vitest() {
         let file_path = "demo/vitest/basic.test.ts";
         let language = tree_sitter_javascript::language();
-        let test_items = discover_with_treesitter(file_path, &language, DISCOVER_JEST_QUERY).unwrap();
+        let test_items =
+            discover_with_treesitter(file_path, &language, DISCOVER_JEST_QUERY).unwrap();
         assert!(!test_items.is_empty());
     }
 
@@ -342,7 +343,8 @@ mod tests {
     fn test_discover_deno() {
         let file_path = "demo/deno/main_test.ts";
         let language = tree_sitter_javascript::language();
-        let test_items = discover_with_treesitter(file_path, &language, DISCOVER_DENO_QUERY).unwrap();
+        let test_items =
+            discover_with_treesitter(file_path, &language, DISCOVER_DENO_QUERY).unwrap();
         assert!(!test_items.is_empty());
     }
 

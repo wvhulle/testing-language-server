@@ -1,11 +1,9 @@
-use std::fs::File;
-use std::io::BufReader;
+use std::{fs::File, io::BufReader};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use xml::reader::{ParserConfig, XmlEvent};
 
-use crate::error::LSError;
-use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH};
+use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH, error::LSError};
 
 pub struct ResultFromXml {
     pub message: String,

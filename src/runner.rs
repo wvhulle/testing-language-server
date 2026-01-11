@@ -1,7 +1,6 @@
 //! Test runner trait and registry.
 
-use crate::error::LSError;
-use crate::{go, javascript, php, rust, Diagnostics, DiscoveredTests, Workspaces};
+use crate::{Diagnostics, DiscoveredTests, Workspaces, error::LSError, go, javascript, php, rust};
 
 /// Trait for test runners.
 ///

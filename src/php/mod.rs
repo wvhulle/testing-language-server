@@ -1,12 +1,13 @@
 pub mod call;
 pub mod parse;
 
-use crate::error::LSError;
-use crate::runner::Runner;
-use crate::{Diagnostics, DiscoveredTests, FileTests, TestItem, Workspaces, MAX_CHAR_LENGTH};
-
 use lsp_types::{Position, Range};
 use tree_sitter::{Query, QueryCursor};
+
+use crate::{
+    Diagnostics, DiscoveredTests, FileTests, MAX_CHAR_LENGTH, TestItem, Workspaces, error::LSError,
+    runner::Runner,
+};
 
 const DISCOVER_QUERY: &str = include_str!("discover.scm");
 
@@ -35,10 +36,7 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 
         for capture in m.captures {
             if Some(capture.index) == name_idx {
-                let text = capture
-                    .node
-                    .utf8_text(source_code.as_bytes())
-                    .unwrap_or("");
+                let text = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
                 name = Some(text.to_string());
             }
             if Some(capture.index) == def_idx {
@@ -103,10 +101,7 @@ impl Runner for PhpunitRunner {
         workspace: &str,
         extra_args: &[String],
     ) -> Result<Diagnostics, LSError> {
-        let filter_pattern = extra_args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or(".*");
+        let filter_pattern = extra_args.first().map(|s| s.as_str()).unwrap_or(".*");
 
         let (_, log_path) = call::run_phpunit(workspace, file_paths, filter_pattern)?;
 

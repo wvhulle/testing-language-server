@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::{path::PathBuf, sync::OnceLock};
 
 use clap::Parser;
 
@@ -49,5 +48,7 @@ pub fn init() -> &'static Config {
 }
 
 pub fn get() -> &'static Config {
-    CONFIG.get().expect("Config not initialized. Call config::init() first.")
+    CONFIG
+        .get()
+        .expect("Config not initialized. Call config::init() first.")
 }

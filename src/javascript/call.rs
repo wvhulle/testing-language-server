@@ -1,9 +1,9 @@
-use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::{
+    path::PathBuf,
+    process::{Command, Output},
+};
 
-use crate::config;
-use crate::error::LSError;
-use crate::log::write_result_log;
+use crate::{config, error::LSError, log::write_result_log};
 
 pub fn run_jest(workspace: &str) -> Result<(Output, PathBuf), LSError> {
     let log_path = PathBuf::from(config::get().cache_dir()).join("jest.json");

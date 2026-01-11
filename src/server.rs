@@ -1,19 +1,16 @@
+use std::{
+    collections::HashMap,
+    env::current_dir,
+    path::{Path, PathBuf},
+};
+
 use glob::Pattern;
 use lsp_types::*;
 use serde::Deserialize;
-use serde_json::json;
-use serde_json::Value;
-use std::collections::HashMap;
-use std::env::current_dir;
-use std::path::Path;
-use std::path::PathBuf;
-use test_lsp::error::LSError;
-use test_lsp::protocol;
-use test_lsp::runner;
-use test_lsp::workspace;
+use serde_json::{Value, json};
 use test_lsp::{
     AdapterConfiguration, AdapterId, DiscoveredTests, FileDiagnostics, WorkspaceAnalysis,
-    Workspaces,
+    Workspaces, error::LSError, protocol, runner, workspace,
 };
 
 const TOML_FILE_NAME: &str = ".testingls.toml";
@@ -38,8 +35,10 @@ impl Default for TestingLS {
 }
 
 /// The status of workspace diagnostics
-/// - Skipped: Skip workspace diagnostics (when `enable_workspace_diagnostics` is false)
-/// - Done: Finish workspace diagnostics (when `enable_workspace_diagnostics` is true)
+/// - Skipped: Skip workspace diagnostics (when `enable_workspace_diagnostics`
+///   is false)
+/// - Done: Finish workspace diagnostics (when `enable_workspace_diagnostics` is
+///   true)
 #[derive(Debug, PartialEq, Eq)]
 pub enum WorkspaceDiagnosticsStatus {
     Skipped,
@@ -215,9 +214,7 @@ impl TestingLS {
             };
             self.workspaces_cache.push(WorkspaceAnalysis::new(
                 adapter,
-                Workspaces {
-                    map: workspace_map,
-                },
+                Workspaces { map: workspace_map },
             ))
         }
         tracing::info!("workspaces_cache={:#?}", self.workspaces_cache);
@@ -230,10 +227,10 @@ impl TestingLS {
     }
 
     /// Diagnoses the entire workspace for diagnostics.
-    /// This function will refresh the workspace cache, check if workspace diagnostics are enabled,
-    /// and then iterate through all workspaces to diagnose them.
-    /// It will trigger the publication of diagnostics for all files in the workspace
-    /// through the Language Server Protocol.
+    /// This function will refresh the workspace cache, check if workspace
+    /// diagnostics are enabled, and then iterate through all workspaces to
+    /// diagnose them. It will trigger the publication of diagnostics for
+    /// all files in the workspace through the Language Server Protocol.
     pub fn diagnose_workspace(&mut self) -> Result<WorkspaceDiagnosticsStatus, LSError> {
         self.refresh_workspaces_cache()?;
         if !self.options.enable_workspace_diagnostics.unwrap_or(true) {
@@ -263,7 +260,9 @@ impl TestingLS {
                     .workspaces
                     .map
                     .iter()
-                    .any(|(_, workspace): (&String, &Vec<String>)| workspace.contains(&path.to_string()))
+                    .any(|(_, workspace): (&String, &Vec<String>)| {
+                        workspace.contains(&path.to_string())
+                    })
                 {
                     return false;
                 }
@@ -277,9 +276,10 @@ impl TestingLS {
         }
     }
 
-    /// Checks a specific file for diagnostics, optionally refreshing the workspace cache.
-    /// This function will trigger the publication of diagnostics for the specified file
-    /// through the Language Server Protocol.
+    /// Checks a specific file for diagnostics, optionally refreshing the
+    /// workspace cache. This function will trigger the publication of
+    /// diagnostics for the specified file through the Language Server
+    /// Protocol.
     pub fn check_file(&mut self, path: &str, refresh_needed: bool) -> Result<(), LSError> {
         if refresh_needed || self.workspaces_cache.is_empty() {
             self.refresh_workspaces_cache()?;
@@ -452,8 +452,9 @@ impl TestingLS {
 
 #[cfg(test)]
 mod tests {
-    use lsp_types::{Url, WorkspaceFolder};
     use std::collections::HashMap;
+
+    use lsp_types::{Url, WorkspaceFolder};
 
     use super::*;
 
@@ -481,7 +482,7 @@ mod tests {
         let abs_path_of_demo = std::env::current_dir().unwrap().join("demo/rust");
         let adapter_conf = AdapterConfiguration {
             test_kind: "cargo-test".to_string(),
-            include: vec!["src/**/*.rs".to_string()],  // Only include files in src/
+            include: vec!["src/**/*.rs".to_string()], // Only include files in src/
             exclude: vec!["**/target/**".to_string()],
             ..Default::default()
         };
@@ -497,7 +498,10 @@ mod tests {
             workspaces_cache: Vec::new(),
         };
         server.diagnose_workspace().unwrap();
-        assert!(!server.workspaces_cache.is_empty(), "Should have detected workspaces");
+        assert!(
+            !server.workspaces_cache.is_empty(),
+            "Should have detected workspaces"
+        );
         server
             .workspaces_cache
             .iter()
@@ -508,10 +512,17 @@ mod tests {
                     .workspaces
                     .data
                     .get(abs_path_of_demo.to_str().unwrap());
-                assert!(demo_workspace.is_some(), "Should detect demo/rust workspace");
+                assert!(
+                    demo_workspace.is_some(),
+                    "Should detect demo/rust workspace"
+                );
                 let paths = demo_workspace.unwrap();
                 paths.iter().for_each(|path| {
-                    assert!(path.contains("rust/src"), "Path should be in rust/src: {}", path);
+                    assert!(
+                        path.contains("rust/src"),
+                        "Path should be in rust/src: {}",
+                        path
+                    );
                 });
             });
     }

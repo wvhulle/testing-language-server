@@ -1,15 +1,15 @@
 pub mod call;
 pub mod parse;
 
-use std::path::PathBuf;
-use std::str::FromStr;
-
-use crate::error::LSError;
-use crate::runner::Runner;
-use crate::{Diagnostics, DiscoveredTests, FileTests, TestItem, Workspaces, MAX_CHAR_LENGTH};
+use std::{path::PathBuf, str::FromStr};
 
 use lsp_types::{Position, Range};
 use tree_sitter::{Query, QueryCursor};
+
+use crate::{
+    Diagnostics, DiscoveredTests, FileTests, MAX_CHAR_LENGTH, TestItem, Workspaces, error::LSError,
+    runner::Runner,
+};
 
 const DISCOVER_QUERY: &str = include_str!("discover.scm");
 
@@ -42,10 +42,7 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 
         for capture in m.captures {
             if capture.index == name_idx {
-                let text = capture
-                    .node
-                    .utf8_text(source_code.as_bytes())
-                    .unwrap_or("");
+                let text = capture.node.utf8_text(source_code.as_bytes()).unwrap_or("");
                 // Remove quotes from string literals
                 name = Some(text.trim_matches('"').to_string());
             }

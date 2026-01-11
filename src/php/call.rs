@@ -1,8 +1,9 @@
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::{
+    path::PathBuf,
+    process::{Command, Output, Stdio},
+};
 
-use crate::config;
-use crate::error::LSError;
+use crate::{config, error::LSError};
 
 pub fn run_phpunit(
     workspace: &str,

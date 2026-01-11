@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::error::LSError;
-use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH};
+use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH, error::LSError};
 
 #[derive(Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -128,8 +126,7 @@ pub fn parse_go_test_json(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::read_to_string;
-    use std::str::FromStr;
+    use std::{fs::read_to_string, str::FromStr};
 
     use super::*;
 

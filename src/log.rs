@@ -1,12 +1,10 @@
-use crate::config;
-use crate::error::LSError;
+use std::{fs, io, process::Output};
+
 use chrono::{NaiveDate, Utc};
 use regex::Regex;
-use std::fs;
-use std::io;
-use std::process::Output;
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_appender::rolling;
+use tracing_appender::{non_blocking::WorkerGuard, rolling};
+
+use crate::{config, error::LSError};
 
 /// Clean old log files from a directory.
 pub fn clean_old_logs(

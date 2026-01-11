@@ -3,13 +3,9 @@ mod server;
 use std::io::{self, BufRead, Read};
 
 use lsp_types::InitializeParams;
-use serde::de::Error;
-use serde::Deserialize;
-use serde_json::{json, Value};
-use test_lsp::config;
-use test_lsp::error::LSError;
-use test_lsp::log::init_logging;
-use test_lsp::protocol;
+use serde::{Deserialize, de::Error};
+use serde_json::{Value, json};
+use test_lsp::{config, error::LSError, log::init_logging, protocol};
 
 use crate::server::TestingLS;
 

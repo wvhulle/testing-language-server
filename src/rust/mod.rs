@@ -1,28 +1,32 @@
 mod call;
 mod parse;
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use lsp_types::{Position, Range};
 use tree_sitter::{Point, Query, QueryCursor};
 
-use crate::error::LSError;
-use crate::runner::Runner;
-use crate::{Diagnostics, DiscoveredTests, FileTests, TestItem, Workspaces, MAX_CHAR_LENGTH};
+use crate::{
+    Diagnostics, DiscoveredTests, FileTests, MAX_CHAR_LENGTH, TestItem, Workspaces, error::LSError,
+    runner::Runner,
+};
 
 const DISCOVER_QUERY: &str = include_str!("discover.scm");
 
 /// Convert a file path to its Rust module path.
 /// e.g., "src/rules/side_effects/mod.rs" -> "rules::side_effects"
-/// e.g., "src/rules/side_effects/detect_bad.rs" -> "rules::side_effects::detect_bad"
+/// e.g., "src/rules/side_effects/detect_bad.rs" ->
+/// "rules::side_effects::detect_bad"
 fn file_path_to_module_path(file_path: &str) -> String {
     let path = Path::new(file_path);
     let components: Vec<_> = path.components().collect();
 
-    let src_idx = components.iter().position(|c| {
-        matches!(c, std::path::Component::Normal(s) if s.to_str() == Some("src"))
-    });
+    let src_idx = components
+        .iter()
+        .position(|c| matches!(c, std::path::Component::Normal(s) if s.to_str() == Some("src")));
 
     let relevant = match src_idx {
         Some(idx) => &components[idx + 1..],
@@ -56,7 +60,8 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
 
     let source_code = std::fs::read_to_string(file_path)?;
     let tree = parser.parse(&source_code, None).unwrap();
-    let query = Query::new(&tree_sitter_rust::language(), DISCOVER_QUERY).expect("Error creating query");
+    let query =
+        Query::new(&tree_sitter_rust::language(), DISCOVER_QUERY).expect("Error creating query");
 
     let mut cursor = QueryCursor::new();
     cursor.set_byte_range(tree.root_node().byte_range());
@@ -82,7 +87,10 @@ fn discover_tests(file_path: &str) -> Result<Vec<TestItem>, LSError> {
                 "namespace.definition" => namespace_stack.push((start, end)),
                 "namespace.name" => {
                     if let Some((ns_start, ns_end)) = namespace_stack.first() {
-                        if start.row >= ns_start.row && end.row <= ns_end.row && !namespace_name.is_empty() {
+                        if start.row >= ns_start.row
+                            && end.row <= ns_end.row
+                            && !namespace_name.is_empty()
+                        {
                             namespace_name = format!("{}::{}", namespace_name, value);
                         } else {
                             namespace_name = value.to_string();
@@ -236,11 +244,15 @@ impl Runner for CargoNextestRunner {
 
         let output = call::run_cargo_nextest(workspace, extra_args, &test_ids)?;
 
-        // Nextest outputs to stderr, and status code 100 means tests failed (not an error)
+        // Nextest outputs to stderr, and status code 100 means tests failed (not an
+        // error)
         let stderr_output = String::from_utf8(output.stderr)?;
         let unexpected_status = output.status.code().map(|code| code != 100 && code != 0);
 
-        if output.stdout.is_empty() && !stderr_output.is_empty() && unexpected_status.unwrap_or(false) {
+        if output.stdout.is_empty()
+            && !stderr_output.is_empty()
+            && unexpected_status.unwrap_or(false)
+        {
             return Err(LSError::AdapterError);
         }
 

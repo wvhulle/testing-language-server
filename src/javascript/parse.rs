@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use regex::Regex;
 use serde_json::Value;
-use xml::{reader::XmlEvent, ParserConfig};
+use xml::{ParserConfig, reader::XmlEvent};
 
-use crate::error::LSError;
-use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH};
+use crate::{Diagnostics, FileDiagnostics, MAX_CHAR_LENGTH, error::LSError};
 
 /// Clean ANSI escape sequences from text
 pub fn clean_ansi(input: &str) -> String {
@@ -40,10 +38,7 @@ pub fn resolve_path(base_dir: &std::path::Path, relative_path: &str) -> PathBuf 
 }
 
 /// Parse Jest JSON output format
-pub fn parse_jest_json(
-    test_result: &str,
-    file_paths: Vec<String>,
-) -> Result<Diagnostics, LSError> {
+pub fn parse_jest_json(test_result: &str, file_paths: Vec<String>) -> Result<Diagnostics, LSError> {
     let mut result_map: HashMap<String, Vec<Diagnostic>> = HashMap::new();
     let json: Value = serde_json::from_str(test_result)?;
     let test_results = json["testResults"].as_array().unwrap();
@@ -99,7 +94,8 @@ pub fn parse_jest_json(
     })
 }
 
-/// Parse Vitest JSON output format (similar to Jest but slightly different column handling)
+/// Parse Vitest JSON output format (similar to Jest but slightly different
+/// column handling)
 pub fn parse_vitest_json(
     test_result: &str,
     file_paths: Vec<String>,

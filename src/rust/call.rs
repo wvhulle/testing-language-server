@@ -1,10 +1,13 @@
 use std::process::{Command, Output};
 
-use crate::error::LSError;
-use crate::log::write_result_log;
+use crate::{error::LSError, log::write_result_log};
 
 /// Run cargo test with JSON output format.
-pub fn run_cargo_test(workspace: &str, extra_args: &[String], test_ids: &[String]) -> Result<Output, LSError> {
+pub fn run_cargo_test(
+    workspace: &str,
+    extra_args: &[String],
+    test_ids: &[String],
+) -> Result<Output, LSError> {
     let output = Command::new("cargo")
         .current_dir(workspace)
         .arg("test")
@@ -20,14 +23,21 @@ pub fn run_cargo_test(workspace: &str, extra_args: &[String], test_ids: &[String
     write_result_log("cargo_test.log", &output)?;
 
     if !output.stderr.is_empty() {
-        tracing::debug!("cargo test stderr: {}", String::from_utf8_lossy(&output.stderr));
+        tracing::debug!(
+            "cargo test stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     Ok(output)
 }
 
 /// Run cargo nextest with text output format.
-pub fn run_cargo_nextest(workspace: &str, extra_args: &[String], test_ids: &[String]) -> Result<Output, LSError> {
+pub fn run_cargo_nextest(
+    workspace: &str,
+    extra_args: &[String],
+    test_ids: &[String],
+) -> Result<Output, LSError> {
     let output = Command::new("cargo")
         .current_dir(workspace)
         .arg("nextest")
